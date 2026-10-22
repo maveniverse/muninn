@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) 2026 Maveniverse Org.
+    All rights reserved. This program and the accompanying materials
+    are made available under the terms of the Eclipse Public License v2.0
+    which accompanies this distribution, and is available at
+    https://www.eclipse.org/legal/epl-v20.html
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>eu.maveniverse.maven.parent</groupId>
+    <artifactId>parent</artifactId>
+    <version>62</version>
+  </parent>
+
+  <groupId>eu.maveniverse.maven.muninn</groupId>
+  <artifactId>muninn</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>${project.groupId}:${project.artifactId}</name>
+  <description>Core extension that replaces console output with a compact JSON build report for coding agents.</description>
+
+  <url>https://www.maveniverse.eu/muninn</url>
+  <inceptionYear>2026</inceptionYear>
+
+  <licenses>
+    <license>
+      <name>EPL-2.0</name>
+      <url>https://www.eclipse.org/legal/epl-2.0/</url>
+    </license>
+  </licenses>
+
+  <modules>
+    <module>extension3</module>
+  </modules>
+
+  <scm>
+    <connection>scm:git:git@github.com:maveniverse/muninn.git</connection>
+    <developerConnection>scm:git:git@github.com:maveniverse/muninn.git</developerConnection>
+    <tag>HEAD</tag>
+    <url>https://github.com/maveniverse/muninn</url>
+  </scm>
+
+  <issueManagement>
+    <system>Github</system>
+    <url>https://github.com/maveniverse/muninn/issues</url>
+  </issueManagement>
+
+  <ciManagement>
+    <system>Github</system>
+    <url>https://github.com/maveniverse/muninn/actions</url>
+  </ciManagement>
+
+  <properties>
+    <project.build.outputTimestamp>2026-10-22T10:00:00Z</project.build.outputTimestamp>
+
+    <!--
+    Build time: latest stable Maven and latest Java LTS.
+    Run time: Maven 3.9+ and Java 8+ (core extension runs inside Maven's JVM).
+    -->
+    <maven.compiler.release>8</maven.compiler.release>
+    <mycila.licenseYear>2026</mycila.licenseYear>
+
+    <!--
+    Build time
+    -->
+    <requireBuildtimeMavenVersion.range>[3.9,)</requireBuildtimeMavenVersion.range>
+    <requireBuildtimeJavaVersion.range>[21,)</requireBuildtimeJavaVersion.range>
+    <!--
+    Runtime: Maven 3.6.3 and ${maven.compiler.release}
+    -->
+    <requireRuntimeMavenVersion.range>[3.9,)</requireRuntimeMavenVersion.range>
+    <requireRuntimeJavaVersion.range>[${maven.compiler.release},)</requireRuntimeJavaVersion.range>
+
+    <!-- Dependency versions -->
+    <version.maven>3.9.16</version.maven>
+    <version.slf4j>1.7.36</version.slf4j>
+    <version.shared>0.2.6</version.shared>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>javax.inject</groupId>
+        <artifactId>javax.inject</artifactId>
+        <version>1</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.maven</groupId>
+        <artifactId>maven-core</artifactId>
+        <version>${version.maven}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${version.slf4j}</version>
+      </dependency>
+      <dependency>
+        <groupId>eu.maveniverse.maven.shared</groupId>
+        <artifactId>extension</artifactId>
+        <version>${version.shared}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.eclipse.sisu</groupId>
+        <artifactId>sisu-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>index-project</id>
+            <goals>
+              <goal>main-index</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
