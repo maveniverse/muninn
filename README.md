@@ -69,7 +69,7 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
     {"id": "plugins", "path": "plugins", "status": "SKIPPED", "cause": "upstream failed: util"},
     {"id": "net", "path": "net", "status": "FAILED", "kind": "dependency",
      "summary": "could not resolve 1 artifact(s)",
-     "missing": [{"artifact": "com.acme:acme-http:jar:2.3.1", "reason": "not_found",
+     "missing": [{"artifact": "com.acme:acme-http:jar:2.3.1", "via": ["com.acme:acme-client:jar:1.0"], "reason": "not_found",
                   "tried": [{"repo": "corp-nexus", "url": "file:///.../corp-repo", "reason": "not_found"}]}]}
   ],
   "resume": "mvn verify -fae -rf :core",
@@ -89,7 +89,8 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 |---|---|---|
 | `compile` | Compiler plugin's exception long message (`file:[line,col] message` plus indented detail lines) | File relative to the reactor root, line, column, message, detail; deduplicated and capped |
 | `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to the module's own classes |
-| `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
+| `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, `via` (the chain from the direct dependency, for transitive ones), each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
+| `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |
 | `mojo` / `build` | Anything else | Deepest non-empty exception message, plus the exception class |
 
@@ -120,16 +121,18 @@ Other behaviour:
   - unparseable POM and missing dependency version
   - extension inactive without the switch
 
-The workspace had no access to Maven Central, so compile and test failures came from a **stand-in plugin** (`it/standin-plugin`). It reproduces maven-compiler-plugin's `CompilationFailureException` message format, and surefire's `TEST-*.xml` format and failure message, but it is not the real plugins. Dependency resolution and POM errors went through real Maven and Resolver.
+Besides real Maven builds, the offline demo uses a **stand-in plugin** (`it/standin-plugin`) that reproduces maven-compiler-plugin's `CompilationFailureException` message format and surefire's `TEST-*.xml` format, so compile and test failures can be exercised without Maven Central.
 
 ## Not done yet
 
-- **Real plugins:** not run against the real compiler, surefire and failsafe plugins, or with the Kotlin, Groovy or Scala compilers.
-- **`mvn clean`:** the temp-log path exists for it, but there was no clean plugin offline to test with.
+- **Other compilers:** not run with the Kotlin, Groovy or Scala compilers.
 - **Maven 4:** the logging backend differs, so expect `"captured": false` until a Maven 4 redirect is added.
-- **Dependency path:** a `via` chain for missing transitive dependencies, so the agent knows which direct dependency pulls it in.
 - **Compiler warnings:** only counted today; a capped list could be useful.
-- **Read-only queries:** a describe command for agents (effective model, dependency graph and modules as JSON) is not implemented.
+- **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
+- **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
+- **Fixtures for javadoc and `via`:** the javadoc parser has not been run against real maven-javadoc-plugin output, and the demo has no javadoc case.
+- **Automated tests:** there is no `src/test`; verification is the offline demo only.
+- **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build
 

@@ -3,6 +3,7 @@
 .settings/
 .remember/
 target/
+build/
 *.ser
 *.ec
 *.ipr

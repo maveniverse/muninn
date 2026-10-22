@@ -1,4 +1,4 @@
 <settings>
-  <localRepository>/home/cstamas/Worx/maveniverse/mafo/maven-agent-output/it/work/repo</localRepository>
-  <mirrors><mirror><id>corp-nexus</id><mirrorOf>*</mirrorOf><url>file:///home/cstamas/Worx/maveniverse/mafo/maven-agent-output/it/work/remote</url></mirror></mirrors>
+  <localRepository>/home/cstamas/Worx/maveniverse/muninn/it/work/repo</localRepository>
+  <mirrors><mirror><id>corp-nexus</id><mirrorOf>*</mirrorOf><url>file:///home/cstamas/Worx/maveniverse/muninn/it/work/remote</url></mirror></mirrors>
 </settings>

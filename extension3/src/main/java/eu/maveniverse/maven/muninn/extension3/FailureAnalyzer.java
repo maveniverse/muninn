@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +27,7 @@ import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.ProjectBuildingException;
 import org.apache.maven.project.ProjectBuildingResult;
 import org.eclipse.aether.collection.DependencyCollectionException;
+import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.ArtifactResolutionException;
 import org.eclipse.aether.resolution.ArtifactResult;
@@ -43,6 +45,10 @@ final class FailureAnalyzer {
     /** maven-compiler-plugin / plexus-compiler message format: {@code /abs/Foo.java:[12,9] message} */
     private static final Pattern COMPILER_LINE =
             Pattern.compile("^(?:\\[(?:ERROR|WARNING)\\] )?(.+?\\.(?:java|kt|groovy|scala)):\\[(\\d+),(\\d+)\\] (.*)$");
+
+    /** javadoc tool output, as relayed by maven-javadoc-plugin: {@code Exit code: 1 - /abs/Foo.java:12: error: msg} */
+    private static final Pattern JAVADOC_LINE =
+            Pattern.compile("^(?:.*?Exit code: \\d+ - )?(.+?\\.java):(\\d+): (error|warning): (.*)$");
 
     private static final Pattern REPORTS_DIR = Pattern.compile("See (.+?) for the individual test results");
 
@@ -77,6 +83,10 @@ final class FailureAnalyzer {
         }
 
         String longMessage = longMessage(cause);
+        if (isJavadocFailure(cause, mojo)) {
+            javadoc(m, longMessage, cause);
+            return m;
+        }
         List<Map<String, Object>> diagnostics = compilerDiagnostics(longMessage);
         if (!diagnostics.isEmpty() || isCompilationFailure(cause)) {
             m.put("kind", "compile");
@@ -173,11 +183,15 @@ final class FailureAnalyzer {
     private List<Map<String, Object>> resolutionFailures(Throwable t) {
         // artifact coordinates -> exceptions from each repository that was tried
         Map<String, List<Exception>> unresolved = new LinkedHashMap<>();
-        collectUnresolved(t, unresolved, Collections.newSetFromMap(new IdentityHashMap<>()));
+        Map<String, List<String>> via = new HashMap<>();
+        collectUnresolved(t, unresolved, via, Collections.newSetFromMap(new IdentityHashMap<>()));
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map.Entry<String, List<Exception>> u : unresolved.entrySet()) {
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("artifact", u.getKey());
+            if (via.containsKey(u.getKey())) {
+                entry.put("via", via.get(u.getKey())); // direct dependency first, parent of the missing one last
+            }
             List<Map<String, Object>> tries = new ArrayList<>();
             String reason = null;
             for (Exception e : u.getValue()) {
@@ -208,7 +222,8 @@ final class FailureAnalyzer {
         return out;
     }
 
-    private static void collectUnresolved(Throwable t, Map<String, List<Exception>> out, Set<Throwable> seen) {
+    private static void collectUnresolved(
+            Throwable t, Map<String, List<Exception>> out, Map<String, List<String>> via, Set<Throwable> seen) {
         for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
             if (c instanceof org.apache.maven.project.DependencyResolutionException) {
                 // Maven's own exception carries the per-dependency errors in its result.
@@ -219,10 +234,14 @@ final class FailureAnalyzer {
                         List<Exception> errors = res.getResolutionErrors(d);
                         if (errors != null && !errors.isEmpty()) {
                             add(out, d.getArtifact().toString(), errors);
+                            addVia(
+                                    via,
+                                    res.getDependencyGraph(),
+                                    d.getArtifact().toString());
                         }
                     }
                     for (Exception e : res.getCollectionErrors()) {
-                        collectUnresolved(e, out, seen);
+                        collectUnresolved(e, out, via, seen);
                     }
                 }
             } else if (c instanceof ArtifactResolutionException) {
@@ -235,11 +254,15 @@ final class FailureAnalyzer {
                 DependencyResolutionException dre = (DependencyResolutionException) c;
                 if (dre.getResult() != null) {
                     for (Exception e : dre.getResult().getCollectExceptions()) {
-                        collectUnresolved(e, out, seen);
+                        collectUnresolved(e, out, via, seen);
                     }
                     for (ArtifactResult r : dre.getResult().getArtifactResults()) {
                         if (!r.isResolved() && !r.getExceptions().isEmpty()) {
                             add(out, r.getRequest().getArtifact().toString(), r.getExceptions());
+                            addVia(
+                                    via,
+                                    dre.getResult().getRoot(),
+                                    r.getRequest().getArtifact().toString());
                         }
                     }
                 }
@@ -247,7 +270,7 @@ final class FailureAnalyzer {
                 DependencyCollectionException dce = (DependencyCollectionException) c;
                 if (dce.getResult() != null) {
                     for (Exception e : dce.getResult().getExceptions()) {
-                        collectUnresolved(e, out, seen);
+                        collectUnresolved(e, out, via, seen);
                     }
                 }
             } else if (c instanceof ArtifactTransferException
@@ -256,6 +279,32 @@ final class FailureAnalyzer {
                         c));
             }
         }
+    }
+
+    /** Records the chain of dependencies leading to {@code coords}; nothing for direct dependencies. */
+    private static void addVia(Map<String, List<String>> via, DependencyNode root, String coords) {
+        List<String> path = pathTo(root, coords, new ArrayList<>());
+        if (path != null && !path.isEmpty()) {
+            via.put(coords, path);
+        }
+    }
+
+    private static List<String> pathTo(DependencyNode node, String coords, List<String> parents) {
+        if (node == null) {
+            return null;
+        }
+        for (DependencyNode child : node.getChildren()) {
+            if (child.getArtifact() != null && coords.equals(child.getArtifact().toString())) {
+                return parents;
+            }
+            parents.add(String.valueOf(child.getArtifact()));
+            List<String> found = pathTo(child, coords, parents);
+            if (found != null) {
+                return found;
+            }
+            parents.remove(parents.size() - 1);
+        }
+        return null;
     }
 
     private static void add(Map<String, List<Exception>> out, String coords, List<Exception> errors) {
@@ -362,6 +411,58 @@ final class FailureAnalyzer {
     private static boolean isCompilationFailure(Throwable t) {
         return t.getClass().getSimpleName().equals("CompilationFailureException")
                 || (t.getMessage() != null && t.getMessage().startsWith("Compilation failure"));
+    }
+
+    // ---- javadoc ----------------------------------------------------------------------------
+
+    private static boolean isJavadocFailure(Throwable t, MojoExecution mojo) {
+        return (mojo != null
+                        && mojo.getArtifactId() != null
+                        && mojo.getArtifactId().contains("javadoc"))
+                || (t.getMessage() != null && t.getMessage().contains("Error while generating Javadoc"));
+    }
+
+    /**
+     * Errors and warnings come from the tool output embedded in the plugin's exception, so
+     * warnings are only visible when the build failed (errors, or {@code failOnWarnings}).
+     */
+    private void javadoc(Map<String, Object> m, String longMessage, Throwable cause) {
+        List<Map<String, Object>> errors = new ArrayList<>();
+        List<Map<String, Object>> warnings = new ArrayList<>();
+        Map<String, Object> current = null;
+        for (String line : String.valueOf(longMessage).split("\\R")) {
+            Matcher d = JAVADOC_LINE.matcher(line.trim());
+            if (d.matches()) {
+                current = new LinkedHashMap<>();
+                current.put("file", paths.relString(d.group(1)));
+                current.put("line", Integer.parseInt(d.group(2)));
+                current.put("message", Text.clip(d.group(4), limits.message));
+                List<Map<String, Object>> target = "error".equals(d.group(3)) ? errors : warnings;
+                if (!target.contains(current)) {
+                    target.add(current);
+                }
+            } else if (current != null && line.trim().equals("^")) {
+                current.put("col", line.indexOf('^') + 1); // caret under the source line javadoc echoes
+                current = null;
+            }
+        }
+        m.put("kind", "javadoc");
+        if (errors.isEmpty() && warnings.isEmpty()) {
+            m.put("summary", Text.clip(paths.relString(rootMessage(cause)), limits.message));
+            return;
+        }
+        m.put("summary", errors.size() + " javadoc error(s), " + warnings.size() + " warning(s)");
+        if (!errors.isEmpty()) {
+            m.put("errors", cap(errors, limits.diagnostics));
+        }
+        if (!warnings.isEmpty()) {
+            m.put("warnings", cap(warnings, limits.diagnostics));
+        }
+        int omitted =
+                Math.max(0, errors.size() - limits.diagnostics) + Math.max(0, warnings.size() - limits.diagnostics);
+        if (omitted > 0) {
+            m.put("omitted", omitted);
+        }
     }
 
     // ---- tests ------------------------------------------------------------------------------
