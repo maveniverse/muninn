@@ -6,7 +6,7 @@ Works on Maven 3.9 (slf4j 1.x) and 3.10 (slf4j 2.x); the extension is compiled a
 
 ## Use
 
-Register it in `.mvn/extensions.xml`:
+Register it in `.mvn/extensions.xml` or, **as recommended user-wide extension in** `~/.m2/extensions.xml` (with Maven 3.10.x):
 
 ```xml
 <extensions>
@@ -42,8 +42,9 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
 {
   "schema": 1, "result": "FAILURE", "goals": "verify", "time_s": 0.8,
   "counts": {"ok": 2, "failed": 3, "skipped": 2},
+  "tests": {"run": 9, "failed": 1, "errors": 1, "skipped": 0},
   "modules": [
-    {"id": "core", "path": "core", "status": "FAILED", "phase": "test", "mojo": "standin:test@default-test",
+    {"id": "core", "path": "core", "status": "FAILED", "phase": "test", "mojo": "surefire:test@default-test",
      "kind": "test", "tests": {"run": 4, "failed": 1, "errors": 1, "skipped": 0},
      "summary": "2 of 4 test(s) failed",
      "failures": [
@@ -58,7 +59,7 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "stack": ["com.acme.core.Resolver.depth(Resolver.java:22)",
                   "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:22)"]}],
      "reports": "core/target/surefire-reports"},
-    {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "standin:compile@default-compile",
+    {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
      "errors": [
        {"file": "util/src/main/java/com/acme/util/Strings.java", "line": 7, "col": 16,
@@ -108,7 +109,7 @@ Other behaviour:
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/agent-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
 
-`it/run-demo.sh` runs the whole demo offline: it builds the extension, installs it into a private repository, and runs the six-module reactor.
+The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
 
 ## Tested
 
@@ -121,7 +122,7 @@ Other behaviour:
   - unparseable POM and missing dependency version
   - extension inactive without the switch
 
-Besides real Maven builds, the offline demo uses a **stand-in plugin** (`it/standin-plugin`) that reproduces maven-compiler-plugin's `CompilationFailureException` message format and surefire's `TEST-*.xml` format, so compile and test failures can be exercised without Maven Central.
+The demo reactor uses the real maven-compiler-plugin and maven-surefire-plugin (JUnit 5), so compile and test failures and the test totals come from real plugin output. Maven Central is needed on the first run; plugins are then cached in `it/target/it-work/repo`.
 
 ## Not done yet
 
@@ -131,14 +132,14 @@ Besides real Maven builds, the offline demo uses a **stand-in plugin** (`it/stan
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
 - **Fixtures for javadoc and `via`:** the javadoc parser has not been run against real maven-javadoc-plugin output, and the demo has no javadoc case.
-- **Automated tests:** there is no `src/test`; verification is the offline demo only.
+- **Automated tests:** there is no `src/test`; verification is the `it` module (`DemoIT`) only.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build
 
 ```
-./mvnw clean verify          # build the extension
-./build.sh && it/run-demo.sh # offline demo (javac only, no Maven Central)
+./mvnw clean verify              # build the extension
+./mvnw clean verify -Prun-its    # ... and run the ITs (Central on first run)
 ```
 
 Licensed under [EPL-2.0](LICENSE).

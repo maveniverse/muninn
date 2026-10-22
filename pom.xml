@@ -37,6 +37,7 @@
 
   <modules>
     <module>extension3</module>
+    <module>it</module>
   </modules>
 
   <scm>

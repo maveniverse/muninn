@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) 2026 Maveniverse Org.
+    All rights reserved. This program and the accompanying materials
+    are made available under the terms of the Eclipse Public License v2.0
+    which accompanies this distribution, and is available at
+    https://www.eclipse.org/legal/epl-v20.html
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>eu.maveniverse.maven.muninn</groupId>
+    <artifactId>muninn</artifactId>
+    <version>0.1.1-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>it</artifactId>
+  <name>${project.groupId}:${project.artifactId}</name>
+  <description>Runs the demo reactor in it/src/test/projects/demo with the extension and asserts on the report (failsafe).</description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>eu.maveniverse.maven.muninn</groupId>
+      <artifactId>extension3</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.14.4</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.22.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <profile>
+      <id>run-its</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <systemPropertyVariables>
+                <maven.home>${maven.home}</maven.home>
+                <demo.dir>${project.basedir}/src/test/projects/demo</demo.dir>
+                <work.dir>${project.build.directory}/it-work</work.dir>
+              </systemPropertyVariables>
+            </configuration>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

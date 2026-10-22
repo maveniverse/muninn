@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +75,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         MojoExecution failedMojo;
         Throwable failure;
         Map<String, Object> failureInfo;
+        int[] tests; // run, failed, errors, skipped; null if no test mojo ran
 
         Module(MavenProject project, String id) {
             this.project = project;
@@ -165,8 +167,12 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 Module m = module(e);
                 m.failedMojo = e.getMojoExecution();
                 m.failure = e.getException();
+                countTests(m, e.getMojoExecution());
                 break;
             }
+            case MojoSucceeded:
+                countTests(module(e), e.getMojoExecution());
+                break;
             case ProjectSucceeded:
                 finish(module(e), Status.OK, null);
                 break;
@@ -179,6 +185,34 @@ public class AgentOutputSpy extends AbstractEventSpy {
             default:
             // forks and per-mojo success events add nothing an agent needs
         }
+    }
+
+    /** Adds the surefire/failsafe report totals once the mojo is done; default report directories only. */
+    private void countTests(Module m, MojoExecution mojo) {
+        String a = mojo.getArtifactId();
+        boolean fs = a.equals("maven-failsafe-plugin") && mojo.getGoal().equals("integration-test");
+        if (!fs && !(a.equals("maven-surefire-plugin") && mojo.getGoal().equals("test"))) {
+            return;
+        }
+        Path dir = Paths.get(m.project.getBuild().getDirectory(), fs ? "failsafe-reports" : "surefire-reports");
+        SurefireReports.Result r =
+                SurefireReports.read(dir, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
+        if (m.tests == null) {
+            m.tests = new int[4];
+        }
+        m.tests[0] += r.run;
+        m.tests[1] += r.failed;
+        m.tests[2] += r.errors;
+        m.tests[3] += r.skipped;
+    }
+
+    private static Map<String, Object> testCounts(int[] t) {
+        Map<String, Object> c = new LinkedHashMap<>();
+        c.put("run", t[0]);
+        c.put("failed", t[1]);
+        c.put("errors", t[2]);
+        c.put("skipped", t[3]);
+        return c;
     }
 
     private void registerModules(List<MavenProject> projects) {
@@ -291,6 +325,20 @@ public class AgentOutputSpy extends AbstractEventSpy {
             r.put("counts", counts);
         }
 
+        int[] total = new int[4];
+        boolean anyTests = false;
+        for (Module m : modules.values()) {
+            if (m.tests != null) {
+                anyTests = true;
+                for (int i = 0; i < 4; i++) {
+                    total[i] += m.tests[i];
+                }
+            }
+        }
+        if (anyTests) {
+            r.put("tests", testCounts(total));
+        }
+
         List<Map<String, Object>> list = new ArrayList<>();
         List<String> notBuilt = new ArrayList<>();
         Module firstFailed = null;
@@ -352,6 +400,8 @@ public class AgentOutputSpy extends AbstractEventSpy {
             e.putAll(m.failureInfo);
         } else if (m.status == Status.SKIPPED) {
             e.put("cause", skipCause(m));
+        } else if (m.tests != null) {
+            e.put("tests", testCounts(m.tests));
         }
         return e;
     }
