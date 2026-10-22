@@ -19,9 +19,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import org.apache.maven.executor.Executor;
+import org.apache.maven.executor.ExecutorRequest;
+import org.apache.maven.executor.ExecutorResult;
+import org.apache.maven.executor.forked.ForkedMavenExecutor;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -73,23 +78,25 @@ class DemoIT {
         Path extension = url.startsWith("jar:")
                 ? Paths.get(URI.create(url.substring(4, url.indexOf('!'))))
                 : Paths.get(URI.create(url.substring(0, url.length() - res.length())));
-        ProcessBuilder pb = new ProcessBuilder(
-                Paths.get(System.getProperty("maven.home"), "bin", "mvn").toString(),
-                "-B",
-                "-s",
-                settings.toString(),
-                "-fae",
-                "verify",
-                "-Dmaven.ext.class.path=" + extension,
-                "-Dmuninn.output=json");
-        pb.directory(demo.toFile());
         // private user.home: ~/.m2/extensions.xml and ~/.m2/settings.xml must not leak into the run
-        pb.environment().put("MAVEN_OPTS", "-Duser.home=" + home);
-        pb.redirectErrorStream(true);
+        ExecutorResult result;
+        try (Executor mvn = new ForkedMavenExecutor(Paths.get(System.getProperty("maven.home")))) {
+            result = mvn.execute(ExecutorRequest.mavenBuilder()
+                    .cwd(demo)
+                    .userHomeDirectory(home)
+                    .arguments(
+                            "-B",
+                            "-s",
+                            settings.toString(),
+                            "-fae",
+                            "verify",
+                            "-Dmaven.ext.class.path=" + extension,
+                            "-Dmuninn.output=json")
+                    .build());
+        }
         Path out = work.resolve("mvn.out");
-        pb.redirectOutput(out.toFile());
-        pb.start().waitFor();
-        List<String> lines = Files.readAllLines(out, StandardCharsets.UTF_8);
+        Files.write(out, result.stdOutString().orElse("").getBytes(StandardCharsets.UTF_8));
+        List<String> lines = Arrays.asList(result.stdOutString().orElse("").split("\\R"));
         String json = lines.stream()
                 .filter(l -> l.startsWith("{\"schema\""))
                 .findFirst()
