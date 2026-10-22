@@ -97,7 +97,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 
 Other behaviour:
 
-- **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count, and only from the default `surefire-reports` / `failsafe-reports` directories.
+- **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored).
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
 - **Resume command:** `resume` rebuilds the command from the request, including goals, profiles, `-pl`, `-am`/`-amd`, `-fae`, `-o` and `-D` properties.
@@ -121,9 +121,12 @@ The `it` module runs the six-module reactor in `it/src/test/projects/demo` with 
   - compile errors and test failures/errors
   - not found, cached failure (`-U` hint) and offline resolution failures
   - unparseable POM and missing dependency version
-  - extension inactive without the switch
+  - extension inactive without the switch, agent auto-detection and `off`
+  - test totals from surefire (custom `reportsDirectory`) and failsafe
 
-The demo reactor uses the real maven-compiler-plugin and maven-surefire-plugin (JUnit 5), so compile and test failures and the test totals come from real plugin output. Maven Central is needed on the first run; plugins are then cached in `it/target/it-work/repo`.
+`DemoIT` automates all of these on whichever Maven runs the build (CI runs it on 3.9.16 and 3.10.0); `-T` is not covered.
+
+The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and maven-failsafe-plugin (JUnit 5), so compile and test failures and the test totals come from real plugin output. Maven Central is needed on the first run; plugins are then cached in `it/target/it-work/repo`.
 
 ## Not done yet
 
@@ -133,7 +136,7 @@ The demo reactor uses the real maven-compiler-plugin and maven-surefire-plugin (
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
 - **Fixtures for javadoc and `via`:** the javadoc parser has not been run against real maven-javadoc-plugin output, and the demo has no javadoc case.
-- **Automated tests:** there is no `src/test`; verification is the `it` module (`DemoIT`) only.
+- **Automated tests:** there is no `src/test`; verification is the `it` module (`DemoIT`, 18 tests) only.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build

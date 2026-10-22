@@ -13,4 +13,26 @@
   <parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>1.0-SNAPSHOT</version></parent>
   <artifactId>api</artifactId>
   <dependencies></dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <!-- non-default reports directory: the totals must still find it -->
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <reportsDirectory>${project.build.directory}/custom-reports</reportsDirectory>
+        </configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

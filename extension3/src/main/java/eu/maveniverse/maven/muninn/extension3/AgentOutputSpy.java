@@ -31,7 +31,9 @@ import org.apache.maven.execution.MavenSession;
 import org.apache.maven.execution.ProjectDependencyGraph;
 import org.apache.maven.lifecycle.LifecycleExecutionException;
 import org.apache.maven.plugin.MojoExecution;
+import org.apache.maven.plugin.PluginParameterExpressionEvaluator;
 import org.apache.maven.project.MavenProject;
+import org.codehaus.plexus.util.xml.Xpp3Dom;
 
 /**
  * Core extension that replaces Maven's console output with a compact JSON report meant for
@@ -194,7 +196,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (!fs && !(a.equals("maven-surefire-plugin") && mojo.getGoal().equals("test"))) {
             return;
         }
-        Path dir = Paths.get(m.project.getBuild().getDirectory(), fs ? "failsafe-reports" : "surefire-reports");
+        Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
         SurefireReports.Result r =
                 SurefireReports.read(dir, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
         if (m.tests == null) {
@@ -204,6 +206,23 @@ public class AgentOutputSpy extends AbstractEventSpy {
         m.tests[1] += r.failed;
         m.tests[2] += r.errors;
         m.tests[3] += r.skipped;
+    }
+
+    /** The mojo's {@code reportsDirectory} if configured (expressions evaluated), else the plugin default. */
+    private Path reportsDir(Module m, MojoExecution mojo, String defaultName) {
+        Xpp3Dom cfg = mojo.getConfiguration();
+        Xpp3Dom child = cfg != null ? cfg.getChild("reportsDirectory") : null;
+        if (child != null && child.getValue() != null && session != null) {
+            try {
+                Object v = new PluginParameterExpressionEvaluator(session, mojo).evaluate(child.getValue());
+                if (v != null) {
+                    return m.project.getBasedir().toPath().resolve(v.toString());
+                }
+            } catch (Exception ignored) {
+                // fall back to the default directory
+            }
+        }
+        return Paths.get(m.project.getBuild().getDirectory(), defaultName);
     }
 
     private static Map<String, Object> testCounts(int[] t) {
