@@ -31,8 +31,8 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 
 Exit codes are Maven's own. Two files are written under the top-level project's build directory (`target` unless customized):
 
-- `agent-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
-- `agent-output/report.json`: the same report as stdout
+- `muninn-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
+- `muninn-output/report.json`: the same report as stdout
 
 ## Example
 
@@ -42,7 +42,7 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
 {
   "schema": 1, "result": "FAILURE", "goals": "verify", "time_s": 0.8,
   "counts": {"ok": 2, "failed": 3, "skipped": 2},
-  "tests": {"run": 9, "failed": 1, "errors": 1, "skipped": 0},
+  "tests": {"run": 6, "failed": 1, "errors": 1, "skipped": 1},
   "modules": [
     {"id": "core", "path": "core", "status": "FAILED", "phase": "test", "mojo": "surefire:test@default-test",
      "kind": "test", "tests": {"run": 4, "failed": 1, "errors": 1, "skipped": 0},
@@ -74,14 +74,14 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
                   "tried": [{"repo": "corp-nexus", "url": "file:///.../corp-repo", "reason": "not_found"}]}]}
   ],
   "resume": "mvn verify -fae -rf :core",
-  "log": {"path": "target/agent-output/build.log", "warningsLogged": 1, "errorsLogged": 0}
+  "log": {"path": "target/muninn-output/build.log", "warningsLogged": 1, "errorsLogged": 0}
 }
 ```
 
 On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~600 tokens). The demo plugins are quiet; real builds with download progress, surefire output and full stack traces save considerably more. A successful build is a single short line:
 
 ```json
-{"schema":1,"result":"SUCCESS","goals":"verify","time_s":0.5,"counts":{"ok":1},"log":{"path":"target/agent-output/build.log","warningsLogged":0,"errorsLogged":0}}
+{"schema":1,"result":"SUCCESS","goals":"verify","time_s":0.5,"counts":{"ok":1},"log":{"path":"target/muninn-output/build.log","warningsLogged":0,"errorsLogged":0}}
 ```
 
 ## What it recognizes
@@ -97,6 +97,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 
 Other behaviour:
 
+- **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count, and only from the default `surefire-reports` / `failsafe-reports` directories.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
 - **Resume command:** `resume` rebuilds the command from the request, including goals, profiles, `-pl`, `-am`/`-amd`, `-fae`, `-o` and `-D` properties.
@@ -106,7 +107,7 @@ Other behaviour:
 - **Lifecycle hook:** an `EventSpy` registered through the Sisu index. It reads the request, `ExecutionEvent`s and the `MavenExecutionResult`, and does all its work in `close()`.
 - **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
 - **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`.
-- **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/agent-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
+- **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
 
 The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
