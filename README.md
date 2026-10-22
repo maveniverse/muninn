@@ -29,10 +29,10 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | `-Dmuninn.output.verbose=true` | Also list successful modules |
 | `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
 
-Exit codes are Maven's own. Two files are written under the reactor root:
+Exit codes are Maven's own. Two files are written under the top-level project's build directory (`target` unless customized):
 
-- `target/agent-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
-- `target/agent-output/report.json`: the same report as stdout
+- `agent-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
+- `agent-output/report.json`: the same report as stdout
 
 ## Example
 

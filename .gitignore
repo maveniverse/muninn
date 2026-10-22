@@ -4,6 +4,7 @@
 .remember/
 target/
 build/
+it/work/
 *.ser
 *.ec
 *.ipr

@@ -1,4 +1,0 @@
-<settings>
-  <localRepository>/home/cstamas/Worx/maveniverse/muninn/it/work/repo</localRepository>
-  <mirrors><mirror><id>corp-nexus</id><mirrorOf>*</mirrorOf><url>file:///home/cstamas/Worx/maveniverse/muninn/it/work/remote</url></mirror></mirrors>
-</settings>

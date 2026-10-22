@@ -40,8 +40,9 @@ import org.apache.maven.project.MavenProject;
  * detected ({@code CLAUDECODE=1}, {@code GEMINI_CLI=1} or {@code AGENT} set); otherwise it does nothing.
  * An explicit value, including {@code off}, always wins over detection.
  *
- * <p>The full console log is kept in {@code target/agent-output/build.log} and the report in
- * {@code target/agent-output/report.json}, both under the reactor root.
+ * <p>The full console log is kept in {@code muninn-output/build.log} and the report in
+ * {@code muninn-output/report.json}, both under the top-level project's build directory
+ * ({@code target} by default).
  */
 @Named
 @Singleton
@@ -238,7 +239,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (mode == Mode.OFF) {
             return;
         }
-        Path dir = paths.root().resolve("target").resolve("agent-output");
+        Path dir = buildDirectory().resolve("muninn-output");
         Path log = null;
         if (capture != null) {
             log = dir.resolve("build.log");
@@ -254,6 +255,13 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         out.println(json);
         out.flush();
+    }
+
+    /** The top-level project's build directory (customizable); {@code target} if no project was loaded. */
+    private Path buildDirectory() {
+        MavenProject top = session != null ? session.getTopLevelProject() : null;
+        String dir = top != null && top.getBuild() != null ? top.getBuild().getDirectory() : null;
+        return paths.root().resolve(dir != null ? dir : "target");
     }
 
     private Map<String, Object> report(Path log) {
