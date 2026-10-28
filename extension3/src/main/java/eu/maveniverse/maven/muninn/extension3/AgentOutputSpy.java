@@ -7,6 +7,7 @@
  */
 package eu.maveniverse.maven.muninn.extension3;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +34,8 @@ import org.apache.maven.lifecycle.LifecycleExecutionException;
 import org.apache.maven.plugin.MojoExecution;
 import org.apache.maven.plugin.PluginParameterExpressionEvaluator;
 import org.apache.maven.project.MavenProject;
+import org.apache.maven.settings.Settings;
+import org.apache.maven.settings.building.SettingsBuildingResult;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 
 /**
@@ -73,6 +76,9 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Status status = Status.NOT_BUILT;
         long start;
         long end;
+        boolean started;
+        long startMillis; // wall clock, to tell this build's test reports from stale ones
+        long mojoStartMillis;
         MojoExecution lastMojo;
         MojoExecution failedMojo;
         Throwable failure;
@@ -89,7 +95,8 @@ public class AgentOutputSpy extends AbstractEventSpy {
     private boolean verbose;
     private ConsoleCapture capture;
     private PrintStream out = System.out;
-    private PrintStream err = System.err;
+    private Path workingDirectory = Paths.get(System.getProperty("user.dir")).toAbsolutePath();
+    private List<String> settingsProfiles = Collections.emptyList();
     private MavenExecutionRequest request;
     private MavenSession session;
     private MavenExecutionResult result;
@@ -102,6 +109,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
 
     @Override
     public synchronized void init(Context context) throws Exception {
+        if (System.out == System.err) {
+            // -l <file>: Maven points both at the same file stream, and the user chose where logs go.
+            // An already active copy of this extension (user-wide plus project) does the same.
+            return;
+        }
         Map<String, Object> data = context.getData();
         Properties user = (Properties) data.get("userProperties");
         Properties sys = (Properties) data.get("systemProperties");
@@ -119,6 +131,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (mode == Mode.OFF) {
             return;
         }
+        if (data.get("workingDirectory") != null) {
+            workingDirectory = Paths.get(data.get("workingDirectory").toString())
+                    .toAbsolutePath()
+                    .normalize();
+        }
         verbose = user != null && Boolean.parseBoolean(user.getProperty(PROP + ".verbose"));
         limits.diagnostics = intProp(user, PROP + ".maxErrors", limits.diagnostics);
         limits.tests = intProp(user, PROP + ".maxTests", limits.tests);
@@ -127,7 +144,6 @@ public class AgentOutputSpy extends AbstractEventSpy {
         try {
             capture = ConsoleCapture.start();
             out = capture.originalOut();
-            err = capture.originalErr();
         } catch (IOException e) {
             // Without capture the report still prints; it just arrives after the normal log.
             capture = null;
@@ -139,8 +155,15 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (mode == Mode.OFF) {
             return;
         }
-        if (event instanceof MavenExecutionRequest) {
+        if (event instanceof SettingsBuildingResult) {
+            Settings s = ((SettingsBuildingResult) event).getEffectiveSettings();
+            if (s != null) {
+                settingsProfiles = s.getActiveProfiles(); // also in the request, but not typed by the user
+            }
+        } else if (event instanceof MavenExecutionRequest) {
             request = (MavenExecutionRequest) event;
+            // prompts would go to the captured log and the build would wait on input nobody sees
+            request.setInteractiveMode(false);
             Path root = request.getMultiModuleProjectDirectory() != null
                     ? request.getMultiModuleProjectDirectory().toPath()
                     : Paths.get(request.getBaseDirectory() != null ? request.getBaseDirectory() : ".");
@@ -159,12 +182,19 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 session = e.getSession();
                 registerModules(session.getProjects());
                 break;
-            case ProjectStarted:
-                module(e).start = System.nanoTime();
+            case ProjectStarted: {
+                Module m = module(e);
+                m.start = System.nanoTime();
+                m.startMillis = System.currentTimeMillis();
+                m.started = true;
                 break;
-            case MojoStarted:
-                module(e).lastMojo = e.getMojoExecution();
+            }
+            case MojoStarted: {
+                Module m = module(e);
+                m.lastMojo = e.getMojoExecution();
+                m.mojoStartMillis = System.currentTimeMillis();
                 break;
+            }
             case MojoFailed: {
                 Module m = module(e);
                 m.failedMojo = e.getMojoExecution();
@@ -189,7 +219,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
     }
 
-    /** Adds the surefire/failsafe report totals once the mojo is done; default report directories only. */
+    /** Adds the totals of the surefire/failsafe reports this mojo execution wrote. */
     private void countTests(Module m, MojoExecution mojo) {
         String a = mojo.getArtifactId();
         boolean fs = a.equals("maven-failsafe-plugin") && mojo.getGoal().equals("integration-test");
@@ -197,8 +227,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
             return;
         }
         Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
-        SurefireReports.Result r =
-                SurefireReports.read(dir, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
+        SurefireReports.Result r = SurefireReports.read(
+                dir, m.mojoStartMillis, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
+        if (r.run == 0) {
+            return; // skipped (-DskipTests) or nothing matched: older reports in the directory are not ours
+        }
         if (m.tests == null) {
             m.tests = new int[4];
         }
@@ -266,14 +299,15 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (m.failure == null) {
                 m.failure = error;
             }
-            m.failureInfo = analyzer.analyzeModule(m.failure != null ? m.failure : error, m.project, m.failedMojo);
+            m.failureInfo = analyzer.analyzeModule(
+                    m.failure != null ? m.failure : error, m.project, m.failedMojo, m.startMillis);
         }
         if (mode == Mode.NDJSON) {
             Map<String, Object> line = new LinkedHashMap<>();
             line.put("event", "module");
             line.put("id", m.id);
             line.put("status", status.name());
-            if (m.start > 0 && seconds(m.end - m.start) >= 0.1) {
+            if (m.started && seconds(m.end - m.start) >= 0.1) {
                 line.put("time_s", seconds(m.end - m.start));
             }
             if (m.failureInfo != null) {
@@ -295,11 +329,22 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Path dir = buildDirectory().resolve("muninn-output");
         Path log = null;
         if (capture != null) {
-            log = dir.resolve("build.log");
-            capture.moveTo(log);
+            log = capture.moveTo(dir.resolve("build.log"));
         }
-        Map<String, Object> report = report(log);
-        String json = Json.write(report);
+        String json;
+        try {
+            json = Json.write(report(log));
+        } catch (RuntimeException e) {
+            // the console is silenced, so a report is the only output the caller gets
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("schema", 1);
+            r.put("result", result != null && !result.hasExceptions() ? "SUCCESS" : "FAILURE");
+            r.put("error", "muninn could not build the report: " + e);
+            if (log != null) {
+                r.put("log", Collections.singletonMap("path", paths.rel(log)));
+            }
+            json = Json.write(r);
+        }
         try {
             Files.createDirectories(dir);
             Files.write(dir.resolve("report.json"), (json + "\n").getBytes(StandardCharsets.UTF_8));
@@ -412,7 +457,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         e.put("id", m.id);
         e.put("path", paths.rel(m.project.getBasedir().toPath()));
         e.put("status", m.status.name());
-        if (m.start > 0 && m.end > 0 && seconds(m.end - m.start) >= 0.1) {
+        if (m.started && m.status != Status.NOT_BUILT && seconds(m.end - m.start) >= 0.1) {
             e.put("time_s", seconds(m.end - m.start));
         }
         if (m.status == Status.FAILED && m.failureInfo != null) {
@@ -458,7 +503,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     if (m.failureInfo == null) {
                         m.status = Status.FAILED;
                         m.failure = t;
-                        m.failureInfo = analyzer.analyzeModule(t, m.project, m.failedMojo);
+                        m.failureInfo = analyzer.analyzeModule(t, m.project, m.failedMojo, m.startMillis);
                     }
                     continue;
                 }
@@ -492,8 +537,27 @@ public class AgentOutputSpy extends AbstractEventSpy {
             for (String g : request.getGoals()) {
                 sb.append(' ').append(quote(g));
             }
-            if (!request.getActiveProfiles().isEmpty()) {
-                sb.append(" -P").append(quote(String.join(",", request.getActiveProfiles())));
+            File pom = request.getPom();
+            if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
+                sb.append(" -f ").append(quote(relToWorkingDirectory(pom.toPath())));
+            }
+            settingsOption(
+                    sb,
+                    "-s",
+                    request.getUserSettingsFile(),
+                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"));
+            if (System.getProperty("maven.conf") != null) {
+                // a custom global file may activate profiles; dropping it would drop them
+                settingsOption(
+                        sb,
+                        "-gs",
+                        request.getGlobalSettingsFile(),
+                        Paths.get(System.getProperty("maven.conf"), "settings.xml"));
+            }
+            List<String> profiles = new ArrayList<>(request.getActiveProfiles());
+            profiles.removeAll(settingsProfiles);
+            if (!profiles.isEmpty()) {
+                sb.append(" -P").append(quote(String.join(",", profiles)));
             }
             if (!request.getSelectedProjects().isEmpty()) {
                 sb.append(" -pl ").append(quote(String.join(",", request.getSelectedProjects())));
@@ -512,6 +576,16 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (request.isOffline()) {
                 sb.append(" -o");
             }
+            if (request.isUpdateSnapshots()) {
+                sb.append(" -U");
+            }
+            if (request.getDegreeOfConcurrency() > 1) {
+                sb.append(" -T ").append(request.getDegreeOfConcurrency());
+            }
+            String builder = request.getBuilderId();
+            if (builder != null && !builder.equals("singlethreaded") && !builder.equals("multithreaded")) {
+                sb.append(" -b ").append(quote(builder));
+            }
             Properties up = request.getUserProperties();
             for (String k : new java.util.TreeSet<>(up.stringPropertyNames())) {
                 if (!k.startsWith(PROP)) {
@@ -519,8 +593,27 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 }
             }
         }
-        sb.append(" -rf :").append(failed.project.getArtifactId());
+        // the module id is groupId:artifactId exactly when the artifactId alone is ambiguous
+        sb.append(" -rf ").append(failed.id.contains(":") ? failed.id : ":" + failed.id);
         return sb.toString();
+    }
+
+    /** Appends {@code option file} unless the file is Maven's default. */
+    private void settingsOption(StringBuilder sb, String option, File file, Path dflt) {
+        if (file != null
+                && !file.toPath()
+                        .toAbsolutePath()
+                        .normalize()
+                        .equals(dflt.toAbsolutePath().normalize())) {
+            sb.append(' ').append(option).append(' ').append(quote(relToWorkingDirectory(file.toPath())));
+        }
+    }
+
+    private String relToWorkingDirectory(Path p) {
+        Path abs = p.toAbsolutePath().normalize();
+        return abs.startsWith(workingDirectory)
+                ? workingDirectory.relativize(abs).toString().replace(File.separatorChar, '/')
+                : abs.toString();
     }
 
     private static String quote(String s) {
@@ -560,7 +653,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
             return dflt;
         }
         try {
-            return Integer.parseInt(p.getProperty(key).trim());
+            return Math.max(0, Integer.parseInt(p.getProperty(key).trim()));
         } catch (NumberFormatException e) {
             return dflt;
         }

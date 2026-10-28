@@ -68,12 +68,14 @@ final class SurefireReports {
 
     /**
      * @param reportsDir   target/surefire-reports or target/failsafe-reports
+     * @param since        epoch millis; older reports are leftovers of earlier builds and are ignored
      * @param ownClassDirs the module's output dirs; frames from classes found there are "ours"
      * @param sourceRoots  main + test source roots, to turn a frame into a file path
      * @param paths        relativizes absolute paths for the report
      */
     static Result read(
             Path reportsDir,
+            long since,
             List<Path> ownClassDirs,
             List<Path> sourceRoots,
             ReactorPaths paths,
@@ -82,8 +84,15 @@ final class SurefireReports {
             int maxMessage) {
         Result r = new Result();
         List<Path> files = new ArrayList<>();
+        // ponytail: whole-second cutoff covers filesystems with 1s mtime granularity; a report written in
+        // the same second just before this build started still slips through
+        long cutoff = since / 1000 * 1000;
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(reportsDir, "TEST-*.xml")) {
-            ds.forEach(files::add);
+            for (Path f : ds) {
+                if (Files.getLastModifiedTime(f).toMillis() >= cutoff) {
+                    files.add(f);
+                }
+            }
         } catch (IOException e) {
             return r; // no reports directory: nothing ran, or a different layout
         }
@@ -152,7 +161,7 @@ final class SurefireReports {
         String message = problem.getAttribute("message");
         String trace = problem.getTextContent();
         if (message.isEmpty() && trace != null) {
-            message = firstLine(trace);
+            message = Text.firstLine(trace);
         }
         m.put("message", Text.clip(message, maxMessage));
 
@@ -257,11 +266,5 @@ final class SurefireReports {
         } catch (NumberFormatException ex) {
             return 0;
         }
-    }
-
-    private static String firstLine(String s) {
-        String t = s.trim();
-        int nl = t.indexOf('\n');
-        return nl > 0 ? t.substring(0, nl).trim() : t;
     }
 }

@@ -13,7 +13,7 @@ Register it in `.mvn/extensions.xml` or, **as recommended user-wide extension in
   <extension>
     <groupId>eu.maveniverse.maven.muninn</groupId>
     <artifactId>extension3</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.1</version>
   </extension>
 </extensions>
 ```
@@ -28,8 +28,9 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | *(none)* | Auto-enables `json` when an agent is detected (`CLAUDECODE=1`, `GEMINI_CLI=1`, or `AGENT` set). `-Dmuninn.output=off` or `MUNINN_OUTPUT=off` opts out |
 | `-Dmuninn.output.verbose=true` | Also list successful modules |
 | `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
+| `-l <file>` | The extension stays inactive whatever the switches say: Maven's own log file is left as is |
 
-Exit codes are Maven's own. Two files are written under the top-level project's build directory (`target` unless customized):
+Exit codes are Maven's own; with `-fn` the report still says `FAILURE` when a module failed, though Maven exits 0. Two files are written under the top-level project's build directory (`target` unless customized):
 
 - `muninn-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
 - `muninn-output/report.json`: the same report as stdout
@@ -97,16 +98,18 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 
 Other behaviour:
 
-- **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored).
+- **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
-- **Resume command:** `resume` rebuilds the command from the request, including goals, profiles, `-pl`, `-am`/`-amd`, `-fae`, `-o` and `-D` properties.
+- **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`), `-pl`, `-am`/`-amd`, `-fae`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
+- **Batch mode:** while active, the build runs non-interactively even without `-B`, since a prompt would go to the log and the build would wait for input nobody sees.
+- **One copy at a time:** if the extension is registered twice (user-wide and per project), the first copy to start does the work and the other stays inactive.
 
 ## How it works
 
 - **Lifecycle hook:** an `EventSpy` registered through the Sisu index. It reads the request, `ExecutionEvent`s and the `MavenExecutionResult`, and does all its work in `close()`.
 - **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
-- **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`.
+- **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`. If Maven exits without closing the spy (on 3.9, e.g. an invalid `settings.xml`), the captured log is printed to the console at exit instead of the report.
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
 
