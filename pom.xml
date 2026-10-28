@@ -19,7 +19,7 @@
 
   <groupId>eu.maveniverse.maven.muninn</groupId>
   <artifactId>muninn</artifactId>
-  <version>0.1.2-SNAPSHOT</version>
+  <version>0.1.2</version>
   <packaging>pom</packaging>
 
   <name>${project.groupId}:${project.artifactId}</name>
@@ -43,7 +43,7 @@
   <scm>
     <connection>scm:git:git@github.com:maveniverse/muninn.git</connection>
     <developerConnection>scm:git:git@github.com:maveniverse/muninn.git</developerConnection>
-    <tag>HEAD</tag>
+    <tag>release-0.1.2</tag>
     <url>https://github.com/maveniverse/muninn</url>
   </scm>
 
@@ -58,7 +58,7 @@
   </ciManagement>
 
   <properties>
-    <project.build.outputTimestamp>2026-10-22T14:13:43Z</project.build.outputTimestamp>
+    <project.build.outputTimestamp>2026-10-28T12:27:32Z</project.build.outputTimestamp>
 
     <!--
     Build time: latest stable Maven and latest Java LTS.
