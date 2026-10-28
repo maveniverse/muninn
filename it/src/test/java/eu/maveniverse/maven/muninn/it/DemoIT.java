@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -127,12 +128,20 @@ class DemoIT {
     }
 
     private static Run mvn(Path cwd, Map<String, String> env, String... args) throws Exception {
-        List<String> all =
-                new ArrayList<>(Arrays.asList("-B", "-s", settings.toString(), "-Dmaven.ext.class.path=" + extension));
+        return mvn(cwd, home, true, env, args);
+    }
+
+    private static Run mvn(Path cwd, Path userHome, boolean batch, Map<String, String> env, String... args)
+            throws Exception {
+        List<String> all = new ArrayList<>();
+        if (batch) {
+            all.add("-B");
+        }
+        all.addAll(Arrays.asList("-s", settings.toString(), "-Dmaven.ext.class.path=" + extension));
         all.addAll(Arrays.asList(args));
         ExecutorRequest request = ExecutorRequest.mavenBuilder()
                 .cwd(cwd)
-                .userHomeDirectory(home)
+                .userHomeDirectory(userHome)
                 .arguments(all)
                 .environmentVariables(env)
                 .build();
@@ -212,6 +221,140 @@ class DemoIT {
         assertEquals("SUCCESS", r.get("result").asText());
         assertEquals(TOTALS_API, r.get("tests").toString());
         assertNull(r.get("modules"));
+    }
+
+    /** Maven 3.9 fails on settings after extensions start, and never closes the spy. */
+    @Test
+    void errorBeforeBuildReachesConsole() throws Exception {
+        Path bad = work.resolve("bad-settings.xml");
+        write(bad, "<settings><broken");
+        Run run = mvn(demo, noAgent(), "-gs", bad.toString(), "-pl", "api", "validate", "-Dmuninn.output=json");
+        assertTrue(run.out.contains("Non-readable settings"), run.out);
+    }
+
+    /** Reports left by an earlier run are not this build's tests. */
+    @Test
+    void skippedTestsIgnoreStaleReports() throws Exception {
+        mvn(demo, noAgent(), "-pl", "api", "verify", "-Dmuninn.output=json");
+        JsonNode r = mvn(demo, noAgent(), "-pl", "api", "verify", "-DskipTests", "-Dmuninn.output=json").report;
+        assertEquals("SUCCESS", r.get("result").asText());
+        assertNull(r.get("tests"));
+    }
+
+    @Test
+    void compileFailureWithoutLocationKeepsCompilerMessage() throws Exception {
+        JsonNode r = mvn(
+                        demo,
+                        noAgent(),
+                        "-pl",
+                        "api",
+                        "clean",
+                        "compile",
+                        "-Dmaven.compiler.release=8",
+                        "-Dmaven.compiler.failOnWarning=true",
+                        "-Dmaven.compiler.showWarnings=true",
+                        "-Dmuninn.output=json")
+                .report;
+        JsonNode api = module(r, "api");
+        assertEquals("compile", api.get("kind").asText());
+        assertTrue(api.get("summary").asText().contains("-Werror"), api.toString());
+        assertNull(api.get("errors"));
+    }
+
+    @Test
+    void negativeBudgetStillReports() throws Exception {
+        JsonNode r = mvn(
+                        demo,
+                        noAgent(),
+                        "-pl",
+                        "util",
+                        "compile",
+                        "-Dmuninn.output=json",
+                        "-Dmuninn.output.maxErrors=-1")
+                .report;
+        assertNotNull(r);
+        assertEquals("compile", module(r, "util").get("kind").asText());
+    }
+
+    @Test
+    void logFileOptionLeavesOutputAlone() throws Exception {
+        Path log = work.resolve("user.log");
+        Run run = mvn(demo, noAgent(), "-pl", "api", "verify", "-Dmuninn.output=json", "-l", log.toString());
+        assertFalse(run.printedReport());
+        assertTrue(read(log).contains("BUILD SUCCESS"));
+    }
+
+    /** -f, -s, -U and CLI profiles survive; settings profiles do not; a duplicate artifactId gets its groupId. */
+    @Test
+    void resumeKeepsWhatTheUserTyped() throws Exception {
+        Path dup = work.resolve("dup");
+        write(
+                Files.createDirectories(dup).resolve("pom.xml"),
+                "<project><modelVersion>4.0.0</modelVersion><groupId>p</groupId><artifactId>parent</artifactId>"
+                        + "<version>1</version><packaging>pom</packaging><modules><module>a</module>"
+                        + "<module>b</module></modules></project>");
+        for (String m : new String[] {"a", "b"}) {
+            write(
+                    Files.createDirectories(dup.resolve(m)).resolve("pom.xml"),
+                    "<project><modelVersion>4.0.0</modelVersion><groupId>g" + m + "</groupId>"
+                            + "<artifactId>x</artifactId><version>1</version><properties>"
+                            + "<maven.compiler.release>11</maven.compiler.release></properties></project>");
+        }
+        Path src = Files.createDirectories(dup.resolve("b/src/main/java"));
+        write(src.resolve("Bad.java"), "class Bad { int x = \"a\"; }");
+        JsonNode r =
+                mvn(work, noAgent(), "-f", "dup/pom.xml", "-U", "-Pextra", "compile", "-Dmuninn.output=json").report;
+        String resume = r.get("resume").asText();
+        assertTrue(resume.contains(" -f dup/pom.xml"), resume);
+        assertTrue(resume.contains(" -s settings.xml"), resume);
+        assertTrue(resume.contains(" -Pextra"), resume);
+        assertFalse(resume.contains("corp"), resume);
+        assertTrue(resume.contains(" -U"), resume);
+        assertTrue(resume.endsWith(" -rf gb:x"), resume);
+    }
+
+    /** Prompts would land in the captured log, so the build runs non-interactive even without -B. */
+    @Test
+    void activeExtensionForcesBatchMode() throws Exception {
+        mvn(
+                demo,
+                home,
+                false,
+                noAgent(),
+                "-pl",
+                "api",
+                "org.apache.maven.plugins:maven-help-plugin:3.5.1:evaluate",
+                "-Dexpression=settings.interactiveMode",
+                "-Dmuninn.output=json");
+        String log = read(demo.resolve("api/target/muninn-output/build.log"));
+        assertTrue(log.contains("\nfalse"), log);
+    }
+
+    /** User-wide (Maven 3.10+ reads ~/.m2/extensions.xml) plus per-run copy: the first one to start does the work. */
+    @Test
+    void secondCopyOfTheExtensionStaysOut() throws Exception {
+        String jar = extension.getFileName().toString();
+        assumeTrue(jar.matches("extension3-.+\\.jar"), "extension is not a jar: " + extension);
+        String version = jar.substring("extension3-".length(), jar.length() - ".jar".length());
+        Path dir = Files.createDirectories(work.resolve("repo/eu/maveniverse/maven/muninn/extension3/" + version));
+        Files.copy(extension, dir.resolve(jar), StandardCopyOption.REPLACE_EXISTING);
+        write(
+                dir.resolve("extension3-" + version + ".pom"),
+                "<project><modelVersion>4.0.0</modelVersion><groupId>eu.maveniverse.maven.muninn</groupId>"
+                        + "<artifactId>extension3</artifactId><version>" + version + "</version></project>");
+        Path twice = Files.createDirectories(work.resolve("home-twice/.m2"));
+        write(
+                twice.resolve("extensions.xml"),
+                "<extensions><extension><groupId>eu.maveniverse.maven.muninn</groupId>"
+                        + "<artifactId>extension3</artifactId><version>" + version
+                        + "</version></extension></extensions>");
+        Run run = mvn(demo, twice.getParent(), true, noAgent(), "-pl", "api", "validate", "-Dmuninn.output=json");
+        assertTrue(run.printedReport(), run.out);
+        assertTrue(read(demo.resolve("api/target/muninn-output/build.log")).contains("BUILD SUCCESS"));
+    }
+
+    private static String read(Path file) throws IOException {
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
     }
 
     @Test

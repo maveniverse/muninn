@@ -62,8 +62,8 @@ final class FailureAnalyzer {
         this.offline = offline;
     }
 
-    /** Failure of a module during the lifecycle. */
-    Map<String, Object> analyzeModule(Throwable error, MavenProject project, MojoExecution mojo) {
+    /** Failure of a module during the lifecycle; {@code since} is when the module started building. */
+    Map<String, Object> analyzeModule(Throwable error, MavenProject project, MojoExecution mojo, long since) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (mojo != null) {
             m.put("phase", mojo.getLifecyclePhase());
@@ -88,7 +88,13 @@ final class FailureAnalyzer {
             return m;
         }
         List<Map<String, Object>> diagnostics = compilerDiagnostics(longMessage);
-        if (!diagnostics.isEmpty() || isCompilationFailure(cause)) {
+        if (diagnostics.isEmpty() && isCompilationFailure(cause)) {
+            // no file:[line,col] entries, e.g. "warnings found and -Werror specified"
+            m.put("kind", "compile");
+            m.put("summary", Text.clip(paths.relString(compilerMessage(longMessage)), limits.message));
+            return m;
+        }
+        if (!diagnostics.isEmpty()) {
             m.put("kind", "compile");
             int total = diagnostics.size();
             m.put("summary", total + " compilation error(s)");
@@ -103,6 +109,7 @@ final class FailureAnalyzer {
             Path reports = reportsDir(cause.getMessage(), project, mojo);
             SurefireReports.Result r = SurefireReports.read(
                     reports,
+                    since,
                     ownClassDirs(project),
                     sourceRoots(project),
                     paths,
@@ -283,14 +290,16 @@ final class FailureAnalyzer {
 
     /** Records the chain of dependencies leading to {@code coords}; nothing for direct dependencies. */
     private static void addVia(Map<String, List<String>> via, DependencyNode root, String coords) {
-        List<String> path = pathTo(root, coords, new ArrayList<>());
+        List<String> path = pathTo(root, coords, new ArrayList<>(), Collections.newSetFromMap(new IdentityHashMap<>()));
         if (path != null && !path.isEmpty()) {
             via.put(coords, path);
         }
     }
 
-    private static List<String> pathTo(DependencyNode node, String coords, List<String> parents) {
-        if (node == null) {
+    /** Depth-first; {@code seen} guards against shared subtrees and cycles in Resolver graphs. */
+    private static List<String> pathTo(
+            DependencyNode node, String coords, List<String> parents, Set<DependencyNode> seen) {
+        if (node == null || !seen.add(node)) {
             return null;
         }
         for (DependencyNode child : node.getChildren()) {
@@ -298,7 +307,7 @@ final class FailureAnalyzer {
                 return parents;
             }
             parents.add(String.valueOf(child.getArtifact()));
-            List<String> found = pathTo(child, coords, parents);
+            List<String> found = pathTo(child, coords, parents, seen);
             if (found != null) {
                 return found;
             }
@@ -406,6 +415,18 @@ final class FailureAnalyzer {
         if (current != null && detail != null && !detail.isEmpty()) {
             current.put("detail", Text.clip(String.join("; ", detail), limits.message));
         }
+    }
+
+    /** The compiler's message without the "Compilation failure" header. */
+    private static String compilerMessage(String longMessage) {
+        List<String> lines = new ArrayList<>();
+        for (String line : String.valueOf(longMessage).split("\\R")) {
+            String t = line.trim();
+            if (!t.isEmpty() && !t.startsWith("Compilation failure")) {
+                lines.add(t);
+            }
+        }
+        return lines.isEmpty() ? "compilation failed" : String.join("; ", lines);
     }
 
     private static boolean isCompilationFailure(Throwable t) {

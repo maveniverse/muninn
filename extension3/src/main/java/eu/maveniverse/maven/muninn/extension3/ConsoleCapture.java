@@ -41,6 +41,7 @@ final class ConsoleCapture {
     private final LineStats stats;
     private final PrintStream capture;
     private boolean loggerRedirected;
+    private boolean moved;
 
     private ConsoleCapture(
             PrintStream out,
@@ -71,7 +72,27 @@ final class ConsoleCapture {
         cc.loggerRedirected = redirectLogger(capture);
         System.setOut(capture);
         System.setErr(capture);
+        Runtime.getRuntime().addShutdownHook(new Thread(cc::abandon, "muninn-console"));
         return cc;
+    }
+
+    /**
+     * Maven exited without closing the spy (on 3.9 e.g. invalid settings fail after extensions start):
+     * hands the captured log back to the console instead of leaving it in a temp file nobody sees.
+     */
+    private synchronized void abandon() {
+        if (moved) {
+            return;
+        }
+        try {
+            capture.flush();
+            sink.close();
+            Files.copy(tempLog, originalOut);
+            originalOut.flush();
+            Files.deleteIfExists(tempLog);
+        } catch (IOException ignored) {
+            // the JVM is going down; nothing else to try
+        }
     }
 
     /**
@@ -114,14 +135,19 @@ final class ConsoleCapture {
         return loggerRedirected;
     }
 
-    /** Moves the log to its final location; later output keeps flowing into it. */
-    synchronized void moveTo(Path target) {
+    /**
+     * Moves the log to its final location; later output keeps flowing into it. Returns where the
+     * log ended up: {@code target}, or the temp file if the move failed.
+     */
+    synchronized Path moveTo(Path target) {
+        moved = true;
         try {
             capture.flush();
-            Files.createDirectories(target.getParent());
             sink.close(); // closes the temp file only
+            Files.createDirectories(target.getParent());
             Files.move(tempLog, target, StandardCopyOption.REPLACE_EXISTING);
             sink.swap(Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.APPEND));
+            return target;
         } catch (IOException e) {
             // Keep logging to the temp file if the move fails; report that path instead.
             try {
@@ -129,6 +155,7 @@ final class ConsoleCapture {
             } catch (IOException ignored) {
                 // nothing sensible left to do
             }
+            return tempLog;
         }
     }
 
