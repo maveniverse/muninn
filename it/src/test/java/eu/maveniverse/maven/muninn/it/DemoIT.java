@@ -284,7 +284,7 @@ class DemoIT {
         assertTrue(read(log).contains("BUILD SUCCESS"));
     }
 
-    /** -f, -s, -U and CLI profiles survive; settings profiles do not; a duplicate artifactId gets its groupId. */
+    /** -f, -s, -gs, -U and CLI profiles survive; settings profiles do not; a duplicate artifactId gets its groupId. */
     @Test
     void resumeKeepsWhatTheUserTyped() throws Exception {
         Path dup = work.resolve("dup");
@@ -302,11 +302,23 @@ class DemoIT {
         }
         Path src = Files.createDirectories(dup.resolve("b/src/main/java"));
         write(src.resolve("Bad.java"), "class Bad { int x = \"a\"; }");
-        JsonNode r =
-                mvn(work, noAgent(), "-f", "dup/pom.xml", "-U", "-Pextra", "compile", "-Dmuninn.output=json").report;
+        write(work.resolve("global-settings.xml"), "<settings/>");
+        JsonNode r = mvn(
+                        work,
+                        noAgent(),
+                        "-f",
+                        "dup/pom.xml",
+                        "-gs",
+                        "global-settings.xml",
+                        "-U",
+                        "-Pextra",
+                        "compile",
+                        "-Dmuninn.output=json")
+                .report;
         String resume = r.get("resume").asText();
         assertTrue(resume.contains(" -f dup/pom.xml"), resume);
         assertTrue(resume.contains(" -s settings.xml"), resume);
+        assertTrue(resume.contains(" -gs global-settings.xml"), resume);
         assertTrue(resume.contains(" -Pextra"), resume);
         assertFalse(resume.contains("corp"), resume);
         assertTrue(resume.contains(" -U"), resume);

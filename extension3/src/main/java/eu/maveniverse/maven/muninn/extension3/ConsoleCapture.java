@@ -137,26 +137,27 @@ final class ConsoleCapture {
 
     /**
      * Moves the log to its final location; later output keeps flowing into it. Returns where the
-     * log ended up: {@code target}, or the temp file if the move failed.
+     * log is: {@code target}, or the temp file if the move failed.
      */
     synchronized Path moveTo(Path target) {
         moved = true;
+        Path at = tempLog;
         try {
             capture.flush();
             sink.close(); // closes the temp file only
             Files.createDirectories(target.getParent());
             Files.move(tempLog, target, StandardCopyOption.REPLACE_EXISTING);
+            at = target;
             sink.swap(Files.newOutputStream(target, StandardOpenOption.CREATE, StandardOpenOption.APPEND));
-            return target;
         } catch (IOException e) {
-            // Keep logging to the temp file if the move fails; report that path instead.
+            // Keep appending wherever the log is now; that is the path the report names.
             try {
-                sink.swap(Files.newOutputStream(tempLog, StandardOpenOption.CREATE, StandardOpenOption.APPEND));
+                sink.swap(Files.newOutputStream(at, StandardOpenOption.CREATE, StandardOpenOption.APPEND));
             } catch (IOException ignored) {
                 // nothing sensible left to do
             }
-            return tempLog;
         }
+        return at;
     }
 
     PrintStream originalOut() {

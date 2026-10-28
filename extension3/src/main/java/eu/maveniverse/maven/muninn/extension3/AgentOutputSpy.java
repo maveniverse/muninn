@@ -541,16 +541,18 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
                 sb.append(" -f ").append(quote(relToWorkingDirectory(pom.toPath())));
             }
-            File userSettings = request.getUserSettingsFile();
-            if (userSettings != null
-                    && !userSettings
-                            .toPath()
-                            .toAbsolutePath()
-                            .normalize()
-                            .equals(Paths.get(System.getProperty("user.home"), ".m2", "settings.xml")
-                                    .toAbsolutePath()
-                                    .normalize())) {
-                sb.append(" -s ").append(quote(relToWorkingDirectory(userSettings.toPath())));
+            settingsOption(
+                    sb,
+                    "-s",
+                    request.getUserSettingsFile(),
+                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"));
+            if (System.getProperty("maven.conf") != null) {
+                // a custom global file may activate profiles; dropping it would drop them
+                settingsOption(
+                        sb,
+                        "-gs",
+                        request.getGlobalSettingsFile(),
+                        Paths.get(System.getProperty("maven.conf"), "settings.xml"));
             }
             List<String> profiles = new ArrayList<>(request.getActiveProfiles());
             profiles.removeAll(settingsProfiles);
@@ -594,6 +596,17 @@ public class AgentOutputSpy extends AbstractEventSpy {
         // the module id is groupId:artifactId exactly when the artifactId alone is ambiguous
         sb.append(" -rf ").append(failed.id.contains(":") ? failed.id : ":" + failed.id);
         return sb.toString();
+    }
+
+    /** Appends {@code option file} unless the file is Maven's default. */
+    private void settingsOption(StringBuilder sb, String option, File file, Path dflt) {
+        if (file != null
+                && !file.toPath()
+                        .toAbsolutePath()
+                        .normalize()
+                        .equals(dflt.toAbsolutePath().normalize())) {
+            sb.append(' ').append(option).append(' ').append(quote(relToWorkingDirectory(file.toPath())));
+        }
     }
 
     private String relToWorkingDirectory(Path p) {

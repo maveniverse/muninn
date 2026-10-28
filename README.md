@@ -101,7 +101,7 @@ Other behaviour:
 - **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
-- **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, command-line profiles (not those activated by `settings.xml`), `-pl`, `-am`/`-amd`, `-fae`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
+- **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`), `-pl`, `-am`/`-amd`, `-fae`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
 - **Batch mode:** while active, the build runs non-interactively even without `-B`, since a prompt would go to the log and the build would wait for input nobody sees.
 - **One copy at a time:** if the extension is registered twice (user-wide and per project), the first copy to start does the work and the other stays inactive.
 
