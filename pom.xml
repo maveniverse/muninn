@@ -79,7 +79,7 @@
     <requireRuntimeJavaVersion.range>[${maven.compiler.release},)</requireRuntimeJavaVersion.range>
 
     <!-- Dependency versions -->
-    <version.maven>3.9.16</version.maven>
+    <version.maven>3.10.0</version.maven>
     <version.slf4j>1.7.36</version.slf4j>
     <version.shared>0.2.6</version.shared>
   </properties>
