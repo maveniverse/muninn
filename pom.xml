@@ -81,7 +81,7 @@
     <!-- Dependency versions -->
     <version.maven>3.9.16</version.maven>
     <version.slf4j>1.7.36</version.slf4j>
-    <version.shared>0.2.6</version.shared>
+    <version.shared>0.2.7</version.shared>
   </properties>
 
   <dependencyManagement>
