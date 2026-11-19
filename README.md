@@ -116,7 +116,7 @@ Other behaviour:
 - **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
 - **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`. If Maven exits without closing the spy (on 3.9, e.g. an invalid `settings.xml`), the captured log is printed to the console at exit instead of the report.
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
-- **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
+- **Dependencies:** Maven-provided APIs, a hand-written JSON writer, and one small runtime dependency, `eu.maveniverse.maven.shared:extension`, which checks the Maven and Java versions at startup; compiled for Java 8.
 
 Unit tests in `extension3/src/test` feed the parsers (compiler, javadoc, resolution failures, JSON) with message text captured from real plugin runs. The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
 
