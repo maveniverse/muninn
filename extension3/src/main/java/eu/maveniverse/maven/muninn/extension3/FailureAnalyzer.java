@@ -89,6 +89,9 @@ final class FailureAnalyzer {
             format(m, longMessage, fix, project);
             return m;
         }
+        if (mojo != null && "maven-enforcer-plugin".equals(mojo.getArtifactId()) && enforcer(m, longMessage)) {
+            return m;
+        }
         if (isJavadocFailure(cause, mojo)) {
             javadoc(m, longMessage, cause);
             return m;
@@ -461,6 +464,45 @@ final class FailureAnalyzer {
             }
         }
         m.put("fix", fix); // the spy turns this into a full command
+    }
+
+    // ---- enforcer -----------------------------------------------------------------------------
+
+    /** maven-enforcer-plugin 3.x puts each failed rule in the exception: header line, then its message. */
+    private static final Pattern ENFORCER_RULE = Pattern.compile("^Rule \\d+: (\\S+) failed with message:$");
+
+    /** Lists each failed rule with its message; false if the message has no rule headers (older enforcer). */
+    private boolean enforcer(Map<String, Object> m, String longMessage) {
+        List<Map<String, Object>> rules = new ArrayList<>();
+        List<String> lines = null;
+        for (String line : String.valueOf(longMessage).split("\\R")) {
+            Matcher r = ENFORCER_RULE.matcher(line.trim());
+            if (r.matches()) {
+                Map<String, Object> rule = new LinkedHashMap<>();
+                String cls = r.group(1);
+                rule.put("rule", cls.substring(cls.lastIndexOf('.') + 1));
+                rules.add(rule);
+                lines = new ArrayList<>();
+                rule.put("message", lines);
+            } else if (lines != null && !line.trim().isEmpty()) {
+                lines.add(line.trim());
+            }
+        }
+        if (rules.isEmpty()) {
+            return false;
+        }
+        for (Map<String, Object> rule : rules) {
+            @SuppressWarnings("unchecked")
+            List<String> msg = (List<String>) rule.get("message");
+            rule.put("message", Text.clip(paths.relString(String.join("; ", msg)), limits.message));
+        }
+        m.put("kind", "enforcer");
+        m.put("summary", rules.size() + " enforcer rule(s) failed");
+        m.put("rules", cap(rules, limits.diagnostics));
+        if (rules.size() > limits.diagnostics) {
+            m.put("omitted", rules.size() - limits.diagnostics);
+        }
+        return true;
     }
 
     // ---- javadoc ----------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.apache.maven.plugin.MojoExecution;
+import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugin.descriptor.MojoDescriptor;
 import org.apache.maven.plugin.descriptor.PluginDescriptor;
@@ -154,6 +155,30 @@ class FailureAnalyzerTest {
         assertEquals("The following files had format violations:", m.get("summary"));
         assertEquals(Arrays.asList("lint/src/main/java/p/Bad.java"), m.get("files"));
         assertEquals("spotless:apply", m.get("fix"));
+    }
+
+    /** maven-enforcer-plugin 3.7.0. */
+    @Test
+    void enforcerRulesWithTheirMessages() {
+        String message = "\nRule 0: org.apache.maven.enforcer.rules.version.RequireJavaVersion failed with message:\n"
+                + "Detected JDK /opt/jdk-25 is version 25.0.5 which is not in the allowed range [99,).\n"
+                + "Rule 1: org.apache.maven.enforcer.rules.version.RequireMavenVersion failed with message:\n"
+                + "Detected Maven Version: 3.9.16 is not in the allowed range [9,).";
+        Map<String, Object> m = analyzer(false)
+                .analyzeModule(
+                        new MojoExecutionException(message),
+                        null,
+                        mojo("maven-enforcer-plugin", "enforce"),
+                        null,
+                        null);
+        assertEquals("enforcer", m.get("kind"));
+        assertEquals("2 enforcer rule(s) failed", m.get("summary"));
+        List<Map<String, Object>> rules = list(m, "rules");
+        assertEquals("RequireJavaVersion", rules.get(0).get("rule"));
+        assertEquals(
+                "Detected JDK /opt/jdk-25 is version 25.0.5 which is not in the allowed range [99,).",
+                rules.get(0).get("message"));
+        assertEquals("RequireMavenVersion", rules.get(1).get("rule"));
     }
 
     @Test
