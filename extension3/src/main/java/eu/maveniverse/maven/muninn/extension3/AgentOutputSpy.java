@@ -437,7 +437,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
             r.put("errors", sessionErrors);
         }
         if (firstFailed != null) {
-            r.put("resume", resumeCommand(firstFailed));
+            r.put("resume", resumeCommand(request, workingDirectory, settingsProfiles, firstFailed.id));
         }
         if (log != null) {
             Map<String, Object> l = new LinkedHashMap<>();
@@ -531,7 +531,9 @@ public class AgentOutputSpy extends AbstractEventSpy {
         return false;
     }
 
-    private String resumeCommand(Module failed) {
+    /** The command that resumes the build at {@code failedId}, keeping what the user typed. */
+    static String resumeCommand(
+            MavenExecutionRequest request, Path workingDirectory, List<String> settingsProfiles, String failedId) {
         StringBuilder sb = new StringBuilder("mvn");
         if (request != null) {
             for (String g : request.getGoals()) {
@@ -539,28 +541,41 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
             File pom = request.getPom();
             if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
-                sb.append(" -f ").append(quote(relToWorkingDirectory(pom.toPath())));
+                sb.append(" -f ").append(quote(relTo(workingDirectory, pom.toPath())));
             }
             settingsOption(
                     sb,
                     "-s",
                     request.getUserSettingsFile(),
-                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"));
+                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"),
+                    workingDirectory);
             if (System.getProperty("maven.conf") != null) {
                 // a custom global file may activate profiles; dropping it would drop them
                 settingsOption(
                         sb,
                         "-gs",
                         request.getGlobalSettingsFile(),
-                        Paths.get(System.getProperty("maven.conf"), "settings.xml"));
+                        Paths.get(System.getProperty("maven.conf"), "settings.xml"),
+                        workingDirectory);
             }
             List<String> profiles = new ArrayList<>(request.getActiveProfiles());
             profiles.removeAll(settingsProfiles);
+            List<String> projects = new ArrayList<>(request.getSelectedProjects());
+            // Maven 3 keeps "!x" exclusions apart from the selection; the resumed build must keep them
+            for (String p : request.getInactiveProfiles()) {
+                profiles.add("!" + p);
+            }
+            for (String p : request.getExcludedProjects()) {
+                projects.add("!" + p);
+            }
             if (!profiles.isEmpty()) {
                 sb.append(" -P").append(quote(String.join(",", profiles)));
             }
-            if (!request.getSelectedProjects().isEmpty()) {
-                sb.append(" -pl ").append(quote(String.join(",", request.getSelectedProjects())));
+            if (!projects.isEmpty()) {
+                sb.append(" -pl ").append(quote(String.join(",", projects)));
+            }
+            if (!request.isRecursive()) {
+                sb.append(" -N");
             }
             String make = request.getMakeBehavior();
             if (MavenExecutionRequest.REACTOR_MAKE_UPSTREAM.equals(make)) {
@@ -570,8 +585,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
             } else if (MavenExecutionRequest.REACTOR_MAKE_BOTH.equals(make)) {
                 sb.append(" -am -amd");
             }
-            if (MavenExecutionRequest.REACTOR_FAIL_AT_END.equals(request.getReactorFailureBehavior())) {
+            String failure = request.getReactorFailureBehavior();
+            if (MavenExecutionRequest.REACTOR_FAIL_AT_END.equals(failure)) {
                 sb.append(" -fae");
+            } else if (MavenExecutionRequest.REACTOR_FAIL_NEVER.equals(failure)) {
+                sb.append(" -fn");
             }
             if (request.isOffline()) {
                 sb.append(" -o");
@@ -594,22 +612,22 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
         }
         // the module id is groupId:artifactId exactly when the artifactId alone is ambiguous
-        sb.append(" -rf ").append(failed.id.contains(":") ? failed.id : ":" + failed.id);
+        sb.append(" -rf ").append(failedId.contains(":") ? failedId : ":" + failedId);
         return sb.toString();
     }
 
     /** Appends {@code option file} unless the file is Maven's default. */
-    private void settingsOption(StringBuilder sb, String option, File file, Path dflt) {
+    private static void settingsOption(StringBuilder sb, String option, File file, Path dflt, Path workingDirectory) {
         if (file != null
                 && !file.toPath()
                         .toAbsolutePath()
                         .normalize()
                         .equals(dflt.toAbsolutePath().normalize())) {
-            sb.append(' ').append(option).append(' ').append(quote(relToWorkingDirectory(file.toPath())));
+            sb.append(' ').append(option).append(' ').append(quote(relTo(workingDirectory, file.toPath())));
         }
     }
 
-    private String relToWorkingDirectory(Path p) {
+    private static String relTo(Path workingDirectory, Path p) {
         Path abs = p.toAbsolutePath().normalize();
         return abs.startsWith(workingDirectory)
                 ? workingDirectory.relativize(abs).toString().replace(File.separatorChar, '/')
