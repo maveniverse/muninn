@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -86,6 +87,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Map<String, Object> failureInfo; // also for a successful module whose test failures the build ignored
         SurefireReports.Result tests; // null if no test mojo ran
         Path testReports; // where the failing tests' reports are (or the last reports read)
+        boolean failsafeFailures; // the failing tests ran in failsafe, not surefire
         final Map<Path, FileTime> countedReports = new HashMap<>(); // two executions may share a directory
 
         Module(MavenProject project, String id) {
@@ -244,6 +246,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         if (m.testReports == null || !r.failures.isEmpty()) {
             m.testReports = dir;
+            m.failsafeFailures = fs;
         }
         m.tests.add(r, limits.tests);
     }
@@ -499,6 +502,17 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         if (m.failureInfo != null) {
             e.putAll(m.failureInfo);
+            if ("test".equals(m.failureInfo.get("kind")) && m.tests != null && !m.tests.failures.isEmpty()) {
+                e.put(
+                        "rerun",
+                        rerunCommand(
+                                request,
+                                workingDirectory,
+                                settingsProfiles,
+                                m.id,
+                                m.failsafeFailures,
+                                m.tests.failures));
+            }
         } else if (m.status == Status.SKIPPED) {
             e.put("cause", skipCause(m));
         } else if (m.tests != null) {
@@ -576,37 +590,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
             for (String g : request.getGoals()) {
                 sb.append(' ').append(quote(g));
             }
-            File pom = request.getPom();
-            if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
-                sb.append(" -f ").append(quote(relTo(workingDirectory, pom.toPath())));
-            }
-            settingsOption(
-                    sb,
-                    "-s",
-                    request.getUserSettingsFile(),
-                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"),
-                    workingDirectory);
-            if (System.getProperty("maven.conf") != null) {
-                // a custom global file may activate profiles; dropping it would drop them
-                settingsOption(
-                        sb,
-                        "-gs",
-                        request.getGlobalSettingsFile(),
-                        Paths.get(System.getProperty("maven.conf"), "settings.xml"),
-                        workingDirectory);
-            }
-            List<String> profiles = new ArrayList<>(request.getActiveProfiles());
-            profiles.removeAll(settingsProfiles);
+            environment(sb, request, workingDirectory, settingsProfiles);
             List<String> projects = new ArrayList<>(request.getSelectedProjects());
             // Maven 3 keeps "!x" exclusions apart from the selection; the resumed build must keep them
-            for (String p : request.getInactiveProfiles()) {
-                profiles.add("!" + p);
-            }
             for (String p : request.getExcludedProjects()) {
                 projects.add("!" + p);
-            }
-            if (!profiles.isEmpty()) {
-                sb.append(" -P").append(quote(String.join(",", profiles)));
             }
             if (!projects.isEmpty()) {
                 sb.append(" -pl ").append(quote(String.join(",", projects)));
@@ -641,16 +629,106 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (builder != null && !builder.equals("singlethreaded") && !builder.equals("multithreaded")) {
                 sb.append(" -b ").append(quote(builder));
             }
-            Properties up = request.getUserProperties();
-            for (String k : new java.util.TreeSet<>(up.stringPropertyNames())) {
-                if (!k.startsWith(PROP)) {
-                    sb.append(" -D").append(quote(k + "=" + up.getProperty(k)));
-                }
-            }
+            userProperties(sb, request, Collections.emptySet());
         }
         // the module id is groupId:artifactId exactly when the artifactId alone is ambiguous
         sb.append(" -rf ").append(failedId.contains(":") ? failedId : ":" + failedId);
         return sb.toString();
+    }
+
+    /**
+     * The command that reruns just the listed failing tests of module {@code moduleId}, with the user's settings,
+     * profiles and properties; {@code -am} builds the reactor modules it depends on.
+     */
+    static String rerunCommand(
+            MavenExecutionRequest request,
+            Path workingDirectory,
+            List<String> settingsProfiles,
+            String moduleId,
+            boolean failsafe,
+            List<Map<String, Object>> failures) {
+        // surefire runs before failsafe, so verify reruns the ITs; the selector props must not fail other modules
+        String testProp = failsafe ? "it.test" : "test";
+        StringBuilder sb = new StringBuilder("mvn ").append(failsafe ? "verify" : "test");
+        if (request != null) {
+            environment(sb, request, workingDirectory, settingsProfiles);
+        }
+        sb.append(" -pl ")
+                .append(moduleId.contains(":") ? moduleId : ":" + moduleId)
+                .append(" -am");
+        if (request != null) {
+            if (request.isOffline()) {
+                sb.append(" -o");
+            }
+            userProperties(sb, request, new java.util.HashSet<>(Arrays.asList("test", "it.test")));
+        }
+        sb.append(" -D").append(quote(testProp + "=" + testSelector(failures)));
+        sb.append(failsafe ? " -Dfailsafe" : " -Dsurefire").append(".failIfNoSpecifiedTests=false");
+        return sb.toString();
+    }
+
+    /** Surefire's {@code -Dtest} syntax: {@code Simple#a+b,Other#c}; parameters and display suffixes dropped. */
+    static String testSelector(List<Map<String, Object>> failures) {
+        Map<String, List<String>> byClass = new LinkedHashMap<>();
+        for (Map<String, Object> f : failures) {
+            String test = String.valueOf(f.get("test"));
+            int hash = test.indexOf('#');
+            String cls = hash >= 0 ? test.substring(0, hash) : test;
+            cls = cls.substring(cls.lastIndexOf('.') + 1);
+            String method = hash >= 0 ? test.substring(hash + 1).split("[(\\[ ]", 2)[0] : "";
+            List<String> methods = byClass.computeIfAbsent(cls, k -> new ArrayList<>());
+            if (!methods.contains(method)) {
+                methods.add(method);
+            }
+        }
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<String, List<String>> e : byClass.entrySet()) {
+            // "" is a class-level failure (e.g. in a @BeforeAll): rerun the whole class
+            parts.add(e.getValue().contains("") ? e.getKey() : e.getKey() + "#" + String.join("+", e.getValue()));
+        }
+        return String.join(",", parts);
+    }
+
+    /** {@code -f}, {@code -s}, {@code -gs} and command-line profiles: what the build needs to see the same project. */
+    private static void environment(
+            StringBuilder sb, MavenExecutionRequest request, Path workingDirectory, List<String> settingsProfiles) {
+        File pom = request.getPom();
+        if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
+            sb.append(" -f ").append(quote(relTo(workingDirectory, pom.toPath())));
+        }
+        settingsOption(
+                sb,
+                "-s",
+                request.getUserSettingsFile(),
+                Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"),
+                workingDirectory);
+        if (System.getProperty("maven.conf") != null) {
+            // a custom global file may activate profiles; dropping it would drop them
+            settingsOption(
+                    sb,
+                    "-gs",
+                    request.getGlobalSettingsFile(),
+                    Paths.get(System.getProperty("maven.conf"), "settings.xml"),
+                    workingDirectory);
+        }
+        List<String> profiles = new ArrayList<>(request.getActiveProfiles());
+        profiles.removeAll(settingsProfiles);
+        for (String p : request.getInactiveProfiles()) {
+            profiles.add("!" + p);
+        }
+        if (!profiles.isEmpty()) {
+            sb.append(" -P").append(quote(String.join(",", profiles)));
+        }
+    }
+
+    /** {@code -D} properties from the command line, except muninn's own and {@code skip}. */
+    private static void userProperties(StringBuilder sb, MavenExecutionRequest request, java.util.Set<String> skip) {
+        Properties up = request.getUserProperties();
+        for (String k : new java.util.TreeSet<>(up.stringPropertyNames())) {
+            if (!k.startsWith(PROP) && !skip.contains(k)) {
+                sb.append(" -D").append(quote(k + "=" + up.getProperty(k)));
+            }
+        }
     }
 
     /** Appends {@code option file} unless the file is Maven's default. */

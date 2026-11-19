@@ -65,7 +65,8 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "stack": ["com.acme.api.Version.length(Version.java:16)",
                   "com.acme.core.Resolver.depth(Resolver.java:30)",
                   "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:30)"]}],
-     "reports": "core/target/test-reports"},
+     "reports": "core/target/test-reports",
+     "rerun": "mvn test -pl :core -am -D'test=ResolverTest#testRangeIncludesUpper+testMissingNode' -Dsurefire.failIfNoSpecifiedTests=false"},
     {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
      "errors": [
@@ -106,6 +107,7 @@ Other behaviour:
 
 - **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
 - **Ignored test failures:** with `testFailureIgnore` (or `-Dmaven.test.failure.ignore=true`) the build passes, but a module with failing tests is still listed, with status `OK`, `kind` `test` and its failures.
+- **Rerun command:** a module with failing tests carries `rerun`, which runs just the listed failing tests (`-Dtest`, or `-Dit.test` with goal `verify` for failsafe) in that module, building the modules it depends on (`-am`), with the user's `-f`, `-s`, `-gs`, profiles and `-D` properties.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
 - **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`) and `!` deactivations, `-pl` with its `!` exclusions, `-N`, `-am`/`-amd`, `-fae`/`-fn`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.

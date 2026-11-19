@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import org.apache.maven.execution.DefaultMavenExecutionRequest;
 import org.apache.maven.execution.MavenExecutionRequest;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,37 @@ class AgentOutputSpyTest {
         assertEquals("", AgentOutputSpy.outputSuffix(cwd, start));
         Files.setLastModifiedTime(log, FileTime.fromMillis(start + 1000));
         assertTrue(AgentOutputSpy.outputSuffix(cwd, start).matches("-\\d+"));
+    }
+
+    private static Map<String, Object> failure(String test) {
+        return Collections.singletonMap("test", test);
+    }
+
+    @Test
+    void rerunSelectsJustTheFailingTests() {
+        MavenExecutionRequest r = new DefaultMavenExecutionRequest();
+        r.setGoals(Collections.singletonList("install"));
+        r.setActiveProfiles(Collections.singletonList("extra"));
+        r.getUserProperties().setProperty("test", "Old*");
+        r.getUserProperties().setProperty("x", "1");
+        assertEquals(
+                "mvn test -Pextra -pl :core -am -Dx=1 -D'test=ResolverTest#a+b,OtherTest'"
+                        + " -Dsurefire.failIfNoSpecifiedTests=false",
+                AgentOutputSpy.rerunCommand(
+                        r,
+                        cwd,
+                        Collections.emptyList(),
+                        "core",
+                        false,
+                        Arrays.asList(
+                                failure("com.acme.ResolverTest#a"),
+                                failure("com.acme.ResolverTest#b(String)[1]"),
+                                failure("com.acme.ResolverTest#b(String)[2]"),
+                                failure("com.acme.OtherTest#"))));
+        assertEquals(
+                "mvn verify -pl g:x -am -D'it.test=FooIT#c' -Dfailsafe.failIfNoSpecifiedTests=false",
+                AgentOutputSpy.rerunCommand(
+                        null, cwd, Collections.emptyList(), "g:x", true, Arrays.asList(failure("p.FooIT#c"))));
     }
 
     @Test

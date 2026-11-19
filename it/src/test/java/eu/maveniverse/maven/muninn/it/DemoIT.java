@@ -195,6 +195,17 @@ class DemoIT {
     }
 
     @Test
+    void rerunSelectsTheFailingTests() {
+        String rerun = module("core").get("rerun").asText();
+        assertTrue(rerun.startsWith("mvn test "), rerun);
+        assertTrue(rerun.contains(" -pl :core -am "), rerun);
+        assertTrue(
+                rerun.endsWith(" -D'test=ResolverTest#rangeIncludesUpper+missingNode'"
+                        + " -Dsurefire.failIfNoSpecifiedTests=false"),
+                rerun);
+    }
+
+    @Test
     void failingTestOutputIsKept() {
         JsonNode failure = module("core").get("failures").get(0);
         assertEquals("[\"picking from [1.0, 1.2]\"]", failure.get("output").toString());
