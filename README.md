@@ -120,7 +120,7 @@ Other behaviour:
 ## How it works
 
 - **Lifecycle hook:** an `EventSpy` registered through the Sisu index. It reads the request, `ExecutionEvent`s and the `MavenExecutionResult`, and does all its work in `close()`.
-- **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points the output target of maven-slf4j-provider (Maven 3) or maven-logging (Maven 4) by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
+- **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
 - **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`. If Maven exits without closing the spy (on 3.9, e.g. an invalid `settings.xml`), the captured log is printed to the console at exit instead of the report.
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **Dependencies:** Maven-provided APIs, a hand-written JSON writer, and one small runtime dependency, `eu.maveniverse.maven.shared:extension`, which checks the Maven and Java versions at startup; compiled for Java 8.
@@ -146,7 +146,7 @@ The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and 
 ## Not done yet
 
 - **Other compilers:** not run with the Kotlin, Groovy or Scala compilers.
-- **Maven 4:** the redirect also knows Maven 4's logging backend (maven-logging's `MavenBaseLogger`, checked against 4.0.0-rc-7's classes), but no build has been run on Maven 4 yet; if it does not take, the report says `"captured": false`.
+- **Maven 4:** not supported. The console is not captured (`"captured": false`), and Maven 4 routes `System.out` through its logger, so even the report arrives as an `[INFO] [stdout]` log line (seen on 4.0.0-rc-7).
 - **Compiler warnings:** only counted today; a capped list could be useful.
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.

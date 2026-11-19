@@ -121,26 +121,23 @@ final class ConsoleCapture {
             choiceField.set(config, ctor.newInstance(target));
             return true;
         } catch (Throwable t) {
-            return false; // different logging backend (e.g. logback); System.out swap still applies
+            return false; // different logging backend (e.g. Maven 4, logback); System.out swap still applies
         }
     }
 
     /**
-     * The logger class holding {@code CONFIG_PARAMS}: maven-slf4j-provider's {@code SimpleLogger} on Maven 3 (package
-     * {@code org.slf4j.simple} with slf4j 2.x, {@code org.slf4j.impl} with 1.x), maven-logging's
-     * {@code MavenBaseLogger} on Maven 4. Each has an {@code OutputChoice} class next to it.
+     * maven-slf4j-provider's {@code SimpleLogger}, which holds {@code CONFIG_PARAMS}: package {@code org.slf4j.simple}
+     * with slf4j 2.x, {@code org.slf4j.impl} with 1.x. Each has an {@code OutputChoice} class next to it.
      */
     private static Class<?> loggerClass(ClassLoader cl) throws ClassNotFoundException {
-        for (String name : new String[] {
-            "org.slf4j.simple.SimpleLogger", "org.slf4j.impl.SimpleLogger", "org.apache.maven.slf4j.MavenBaseLogger"
-        }) {
+        for (String name : new String[] {"org.slf4j.simple.SimpleLogger", "org.slf4j.impl.SimpleLogger"}) {
             try {
                 return Class.forName(name, true, cl);
             } catch (ClassNotFoundException e) {
                 // try the next layout
             }
         }
-        throw new ClassNotFoundException("no known Maven logger");
+        throw new ClassNotFoundException("no maven-slf4j-provider logger");
     }
 
     boolean loggerRedirected() {
