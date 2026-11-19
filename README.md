@@ -113,7 +113,7 @@ Other behaviour:
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
 
-The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
+Unit tests in `extension3/src/test` feed the parsers (compiler, javadoc, resolution failures, JSON) with message text captured from real plugin runs. The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
 
 ## Tested
 
@@ -138,8 +138,7 @@ The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and 
 - **Compiler warnings:** only counted today; a capped list could be useful.
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
-- **Fixtures for javadoc and `via`:** the javadoc parser has not been run against real maven-javadoc-plugin output, and the demo has no javadoc case.
-- **Automated tests:** there is no `src/test`; verification is the `it` module (`DemoIT`, 18 tests) only.
+- **Fixtures for `via`:** the demo covers one transitive path only; the javadoc parser is unit-tested against captured maven-javadoc-plugin 3.12.0 output, but the demo has no javadoc case.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build
