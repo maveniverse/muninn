@@ -212,12 +212,12 @@ final class ConsoleCapture {
     /**
      * Strips ANSI escape sequences and counts [WARNING]/[ERROR] lines on the way to the file.
      */
-    private static final class LineStats extends OutputStream {
+    static final class LineStats extends OutputStream {
         private final OutputStream out;
         private final StringBuilder line = new StringBuilder();
         private int escState; // 0 = normal, 1 = saw ESC, 2 = inside CSI
-        private final AtomicInteger warnings = new AtomicInteger(0);
-        private final AtomicInteger errors = new AtomicInteger();
+        final AtomicInteger warnings = new AtomicInteger();
+        final AtomicInteger errors = new AtomicInteger();
 
         LineStats(OutputStream out) {
             this.out = out;
@@ -247,10 +247,25 @@ final class ConsoleCapture {
             }
         }
 
+        /** Passes runs of plain bytes through in one call; only escape sequences go byte by byte. */
         @Override
         public synchronized void write(byte[] b, int off, int len) throws IOException {
+            int plain = off; // start of the plain run not yet written
             for (int i = off; i < off + len; i++) {
-                write(b[i]);
+                if (escState != 0 || b[i] == 0x1b) {
+                    if (i > plain) {
+                        out.write(b, plain, i - plain);
+                    }
+                    write(b[i]);
+                    plain = i + 1;
+                } else if (b[i] == '\n') {
+                    countLine();
+                } else if (line.length() < 16) {
+                    line.append((char) b[i]);
+                }
+            }
+            if (off + len > plain) {
+                out.write(b, plain, off + len - plain);
             }
         }
 
