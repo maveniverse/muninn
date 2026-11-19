@@ -18,6 +18,7 @@ import org.apache.maven.plugin.MojoExecution;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugin.descriptor.MojoDescriptor;
 import org.apache.maven.plugin.descriptor.PluginDescriptor;
+import org.apache.maven.project.MavenProject;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.resolution.ArtifactRequest;
@@ -70,7 +71,8 @@ class FailureAnalyzerTest {
                 + "  symbol:   variable Joiner\n"
                 + "  location: class com.acme.util.Strings\n";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, null);
+                .analyzeModule(
+                        new MojoFailureException(this, "Compilation failure", longMessage), null, null, null, null);
         assertEquals("compile", m.get("kind"));
         assertEquals("2 compilation error(s)", m.get("summary"));
         Map<String, Object> first = list(m, "errors").get(0);
@@ -85,7 +87,8 @@ class FailureAnalyzerTest {
     void compileFailureWithoutLocationKeepsTheMessage() {
         String longMessage = "Compilation failure\nwarnings found and -Werror specified";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, null);
+                .analyzeModule(
+                        new MojoFailureException(this, "Compilation failure", longMessage), null, null, null, null);
         assertEquals("compile", m.get("kind"));
         assertEquals("warnings found and -Werror specified", m.get("summary"));
         assertNull(m.get("errors"));
@@ -110,7 +113,8 @@ class FailureAnalyzerTest {
                 + "1 warning\n"
                 + "Command line was: /usr/bin/javadoc @options @packages\n";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(message), mojo("maven-javadoc-plugin", "javadoc"), null, null);
+                .analyzeModule(
+                        new MojoFailureException(message), null, mojo("maven-javadoc-plugin", "javadoc"), null, null);
         assertEquals("javadoc", m.get("kind"));
         assertEquals("2 javadoc error(s), 1 warning(s)", m.get("summary"));
         Map<String, Object> first = list(m, "errors").get(0);
@@ -119,6 +123,37 @@ class FailureAnalyzerTest {
         assertEquals(8, first.get("col"));
         assertEquals("unknown tag. Unregistered custom tag?", first.get("message"));
         assertEquals(17, list(m, "warnings").get(0).get("col"));
+    }
+
+    static MojoExecution mojo(String groupId, String artifactId, String prefix, String goal) {
+        MojoExecution m = mojo(artifactId, goal);
+        m.getMojoDescriptor().getPluginDescriptor().setGroupId(groupId);
+        m.getMojoDescriptor().getPluginDescriptor().setGoalPrefix(prefix);
+        return m;
+    }
+
+    /** spotless-maven-plugin 3.11.0 with palantirJavaFormat. */
+    @Test
+    void formatterCheckNamesFilesAndTheFixGoal() {
+        String message = "The following files had format violations:\n"
+                + "    src/main/java/p/Bad.java\n"
+                + "        @@ -1,11 +1,11 @@\n"
+                + "         package\u00b7p;\n"
+                + "        -import\u00b7java.util.List;\n"
+                + "Run 'mvn spotless:apply' to fix these violations.";
+        MavenProject module = new MavenProject();
+        module.setFile(root.resolve("lint/pom.xml").toFile());
+        Map<String, Object> m = analyzer(false)
+                .analyzeModule(
+                        new MojoFailureException(message),
+                        module,
+                        mojo("com.diffplug.spotless", "spotless-maven-plugin", "spotless", "check"),
+                        null,
+                        null);
+        assertEquals("format", m.get("kind"));
+        assertEquals("The following files had format violations:", m.get("summary"));
+        assertEquals(Arrays.asList("lint/src/main/java/p/Bad.java"), m.get("files"));
+        assertEquals("spotless:apply", m.get("fix"));
     }
 
     @Test
@@ -133,8 +168,8 @@ class FailureAnalyzerTest {
         ArtifactResult r2 = new ArtifactResult(new ArtifactRequest(secret, Arrays.asList(corp), null));
         r2.addException(
                 new ArtifactTransferException(secret, corp, "status code: 401, reason phrase: Unauthorized (401)"));
-        Map<String, Object> m =
-                analyzer(false).analyzeModule(new ArtifactResolutionException(Arrays.asList(r1, r2)), null, null, null);
+        Map<String, Object> m = analyzer(false)
+                .analyzeModule(new ArtifactResolutionException(Arrays.asList(r1, r2)), null, null, null, null);
         assertEquals("dependency", m.get("kind"));
         List<Map<String, Object>> entries = list(m, "missing");
         assertEquals("g:missing:jar:1", entries.get(0).get("artifact"));

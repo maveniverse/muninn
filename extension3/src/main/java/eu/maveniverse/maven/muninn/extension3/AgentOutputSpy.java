@@ -316,8 +316,8 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (m.failure == null) {
                 m.failure = error;
             }
-            m.failureInfo =
-                    analyzer.analyzeModule(m.failure != null ? m.failure : error, m.failedMojo, m.tests, m.testReports);
+            m.failureInfo = analyzer.analyzeModule(
+                    m.failure != null ? m.failure : error, m.project, m.failedMojo, m.tests, m.testReports);
         } else if (status == Status.OK && m.tests != null && m.tests.failed + m.tests.errors > 0) {
             // testFailureIgnore / -Dmaven.test.failure.ignore: the build passes, the failures still need fixing
             Map<String, Object> info = new LinkedHashMap<>();
@@ -513,6 +513,10 @@ public class AgentOutputSpy extends AbstractEventSpy {
                                 m.failsafeFailures,
                                 m.tests.failures));
             }
+            if (m.failureInfo.get("fix") != null) {
+                e.put("fix", fixCommand(request, workingDirectory, settingsProfiles, m.id, (String)
+                        m.failureInfo.get("fix")));
+            }
         } else if (m.status == Status.SKIPPED) {
             e.put("cause", skipCause(m));
         } else if (m.tests != null) {
@@ -554,7 +558,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     if (m.failureInfo == null) {
                         m.status = Status.FAILED;
                         m.failure = t;
-                        m.failureInfo = analyzer.analyzeModule(t, m.failedMojo, m.tests, m.testReports);
+                        m.failureInfo = analyzer.analyzeModule(t, m.project, m.failedMojo, m.tests, m.testReports);
                     }
                     continue;
                 }
@@ -665,6 +669,22 @@ public class AgentOutputSpy extends AbstractEventSpy {
         sb.append(" -D").append(quote(testProp + "=" + testSelector(failures)));
         sb.append(failsafe ? " -Dfailsafe" : " -Dsurefire").append(".failIfNoSpecifiedTests=false");
         return sb.toString();
+    }
+
+    /** Runs {@code goal} (e.g. {@code spotless:apply}) on module {@code moduleId} only. */
+    static String fixCommand(
+            MavenExecutionRequest request,
+            Path workingDirectory,
+            List<String> settingsProfiles,
+            String moduleId,
+            String goal) {
+        StringBuilder sb = new StringBuilder("mvn ").append(goal);
+        if (request != null) {
+            environment(sb, request, workingDirectory, settingsProfiles);
+        }
+        return sb.append(" -pl ")
+                .append(moduleId.contains(":") ? moduleId : ":" + moduleId)
+                .toString();
     }
 
     /** Surefire's {@code -Dtest} syntax: {@code Simple#a+b,Other#c}; parameters and display suffixes dropped. */

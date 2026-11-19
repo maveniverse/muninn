@@ -100,6 +100,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 | `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to classes of the reactor's modules, last lines the test printed |
 | `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, `via` (the chain from the direct dependency, for transitive ones), each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
 | `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
+| `format` | Check goals of Spotless, fmt, formatter, impsort, sortpom, prettier, license (com.mycila) and tidy | First line of the message, the files Spotless lists, and `fix`: the command that runs the plugin's fixing goal on the module (e.g. `mvn spotless:apply -pl :core`) |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |
 | `mojo` / `build` | Anything else | Deepest non-empty exception message, plus the exception class |
 

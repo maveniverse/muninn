@@ -86,6 +86,15 @@ class AgentOutputSpyTest {
     }
 
     @Test
+    void fixRunsTheGoalOnTheModule() {
+        MavenExecutionRequest r = new DefaultMavenExecutionRequest();
+        r.setActiveProfiles(Collections.singletonList("extra"));
+        assertEquals(
+                "mvn spotless:apply -Pextra -pl :core",
+                AgentOutputSpy.fixCommand(r, cwd, Collections.emptyList(), "core", "spotless:apply"));
+    }
+
+    @Test
     void ambiguousModuleKeepsGroupId() {
         MavenExecutionRequest r = new DefaultMavenExecutionRequest();
         r.setGoals(Collections.singletonList("install"));
