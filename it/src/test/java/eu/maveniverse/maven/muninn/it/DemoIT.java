@@ -195,6 +195,31 @@ class DemoIT {
     }
 
     @Test
+    void rerunSelectsTheFailingTests() {
+        String rerun = module("core").get("rerun").asText();
+        assertTrue(rerun.startsWith("mvn test "), rerun);
+        assertTrue(rerun.contains(" -pl :core -am "), rerun);
+        assertTrue(
+                rerun.endsWith(" -D'test=ResolverTest#rangeIncludesUpper+missingNode'"
+                        + " -Dsurefire.failIfNoSpecifiedTests=false"),
+                rerun);
+    }
+
+    @Test
+    void failingTestOutputIsKept() {
+        JsonNode failure = module("core").get("failures").get(0);
+        assertEquals("[\"picking from [1.0, 1.2]\"]", failure.get("output").toString());
+    }
+
+    /** core's NPE is thrown in api's code: the stack keeps frames from every reactor module. */
+    @Test
+    void stackKeepsFramesFromOtherModules() {
+        JsonNode stack = module("core").get("failures").get(1).get("stack");
+        assertTrue(stack.get(0).asText().startsWith("com.acme.api.Version.length(Version.java:"), stack.toString());
+        assertTrue(stack.get(1).asText().startsWith("com.acme.core.Resolver.depth("), stack.toString());
+    }
+
+    @Test
     void compileErrors() {
         assertEquals(3, module("util").get("errors").size());
     }

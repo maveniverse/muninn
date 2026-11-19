@@ -11,4 +11,8 @@ public final class Version {
     public static String current() {
         return "1.0";
     }
+
+    public static int length(String version) {
+        return version.length();
+    }
 }

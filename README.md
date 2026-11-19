@@ -27,7 +27,7 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | `MUNINN_OUTPUT=json` | Same, via environment (handy in `AGENTS.md` / agent config) |
 | *(none)* | Auto-enables `json` when an agent is detected (`CLAUDECODE=1`, `GEMINI_CLI=1`, or `AGENT` set). `-Dmuninn.output=off` or `MUNINN_OUTPUT=off` opts out |
 | `-Dmuninn.output.verbose=true` | Also list successful modules |
-| `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
+| `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N`, `.maxOutput=N` | Budgets (defaults 10, 10, 5, 10): diagnostics, failing tests, stack frames, and lines of a failing test's output |
 | `-l <file>` | The extension stays inactive whatever the switches say: Maven's own log file is left as is |
 
 Every `-Dmuninn.output*` option can also be given as a system property, e.g. in `MAVEN_OPTS`; the command line wins.
@@ -57,13 +57,16 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "type": "java.lang.AssertionError", "message": "expected:<1.2> but was:<1.1>",
         "at": "core/src/test/java/com/acme/core/ResolverTest.java:27",
         "stack": ["com.acme.core.ResolverTest.check(ResolverTest.java:27)",
-                  "com.acme.core.ResolverTest.testRangeIncludesUpper(ResolverTest.java:14)"]},
+                  "com.acme.core.ResolverTest.testRangeIncludesUpper(ResolverTest.java:14)"],
+        "output": ["picking from [1.0, 1.2]"]},
        {"test": "com.acme.core.ResolverTest#testMissingNode", "kind": "error",
-        "type": "java.lang.NullPointerException", "message": "Cannot invoke \"String.length()\" because ...",
-        "at": "core/src/test/java/com/acme/core/ResolverTest.java:22",
-        "stack": ["com.acme.core.Resolver.depth(Resolver.java:22)",
-                  "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:22)"]}],
-     "reports": "core/target/test-reports"},
+        "type": "java.lang.NullPointerException", "message": "Cannot invoke \"String.length()\" because \"version\" is null",
+        "at": "core/src/test/java/com/acme/core/ResolverTest.java:30",
+        "stack": ["com.acme.api.Version.length(Version.java:16)",
+                  "com.acme.core.Resolver.depth(Resolver.java:30)",
+                  "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:30)"]}],
+     "reports": "core/target/test-reports",
+     "rerun": "mvn test -pl :core -am -D'test=ResolverTest#testRangeIncludesUpper+testMissingNode' -Dsurefire.failIfNoSpecifiedTests=false"},
     {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
      "errors": [
@@ -94,9 +97,12 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 | `kind` | Source | Content |
 |---|---|---|
 | `compile` | Compiler plugin's exception long message (`file:[line,col] message` plus indented detail lines) | File relative to the reactor root, line, column, message, detail; deduplicated and capped |
-| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to the module's own classes |
+| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to classes of the reactor's modules, last lines the test printed |
 | `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, `via` (the chain from the direct dependency, for transitive ones), each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
 | `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
+| `format` | Check goals of Spotless, fmt, formatter, impsort, sortpom, prettier, license (com.mycila) and tidy | First line of the message, the files Spotless lists, and `fix`: the command that runs the plugin's fixing goal on the module (e.g. `mvn spotless:apply -pl :core`) |
+| `enforcer` | maven-enforcer-plugin 3.x exception message | Each failed rule (`RequireJavaVersion`, `BannedDependencies`, ...) with its message; older enforcers that only log the rules fall back to `mojo` |
+| `lint` | `check` goals of maven-checkstyle-plugin, maven-pmd-plugin and spotbugs-maven-plugin, from their XML reports (`checkstyle-result.xml`, `pmd.xml`, `spotbugsXml.xml`; configured locations honored) | `tool`, then each violation with file, line, column, rule and message; capped by `maxErrors` |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |
 | `mojo` / `build` | Anything else | Deepest non-empty exception message, plus the exception class |
 
@@ -104,6 +110,7 @@ Other behaviour:
 
 - **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
 - **Ignored test failures:** with `testFailureIgnore` (or `-Dmaven.test.failure.ignore=true`) the build passes, but a module with failing tests is still listed, with status `OK`, `kind` `test` and its failures.
+- **Rerun command:** a module with failing tests carries `rerun`, which runs just the listed failing tests (`-Dtest`, or `-Dit.test` with goal `verify` for failsafe) in that module, building the modules it depends on (`-am`), with the user's `-f`, `-s`, `-gs`, profiles and `-D` properties.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
 - **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`) and `!` deactivations, `-pl` with its `!` exclusions, `-N`, `-am`/`-amd`, `-fae`/`-fn`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
@@ -113,7 +120,7 @@ Other behaviour:
 ## How it works
 
 - **Lifecycle hook:** an `EventSpy` registered through the Sisu index. It reads the request, `ExecutionEvent`s and the `MavenExecutionResult`, and does all its work in `close()`.
-- **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
+- **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points the output target of maven-slf4j-provider (Maven 3) or maven-logging (Maven 4) by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
 - **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`. If Maven exits without closing the spy (on 3.9, e.g. an invalid `settings.xml`), the captured log is printed to the console at exit instead of the report.
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **Dependencies:** Maven-provided APIs, a hand-written JSON writer, and one small runtime dependency, `eu.maveniverse.maven.shared:extension`, which checks the Maven and Java versions at startup; compiled for Java 8.
@@ -139,11 +146,12 @@ The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and 
 ## Not done yet
 
 - **Other compilers:** not run with the Kotlin, Groovy or Scala compilers.
-- **Maven 4:** the logging backend differs, so expect `"captured": false` until a Maven 4 redirect is added.
+- **Maven 4:** the redirect also knows Maven 4's logging backend (maven-logging's `MavenBaseLogger`, checked against 4.0.0-rc-7's classes), but no build has been run on Maven 4 yet; if it does not take, the report says `"captured": false`.
 - **Compiler warnings:** only counted today; a capped list could be useful.
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
 - **Fixtures for `via`:** the demo covers one transitive path only; the javadoc parser is unit-tested against captured maven-javadoc-plugin 3.12.0 output, but the demo has no javadoc case.
+- **Test output with `redirectTestOutputToFile`:** a failing test's `output` comes from `<system-out>`/`<system-err>` in its report; when surefire redirects output to `*-output.txt` files, it is not shown.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build

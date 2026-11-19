@@ -7,6 +7,7 @@
  */
 package com.acme.core;
 
+import com.acme.api.Version;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,6 @@ public final class Resolver {
     }
 
     public int depth(Map<String, String> graph, String node) {
-        return graph.get(node).length(); // NPE when node is absent
+        return Version.length(graph.get(node)); // NPE in api when node is absent
     }
 }

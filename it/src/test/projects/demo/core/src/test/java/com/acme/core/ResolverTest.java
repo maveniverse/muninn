@@ -17,6 +17,7 @@ public class ResolverTest {
     @Test
     void rangeIncludesUpper() {
         // expects an inclusive upper bound, the implementation is exclusive
+        System.out.println("picking from [1.0, 1.2]");
         assertEquals("1.2", resolver.pick("1.0", "1.2"));
     }
 

@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -111,27 +112,20 @@ final class SurefireReports {
 
     /**
      * @param files   report files, see {@link #list}
-     * @param project the module: frames from its classes are "ours", its source roots locate them
-     * @param paths   relativizes absolute paths for the report
+     * @param project   the module; its source roots locate the failing line in the test
+     * @param classDirs output directories of all reactor modules: frames from classes found there are "ours"
+     * @param paths     relativizes absolute paths for the report
      */
     static Result read(
             List<Path> files,
             MavenProject project,
+            List<Path> classDirs,
             ReactorPaths paths,
-            int maxFailures,
-            int maxFrames,
-            int maxMessage) {
+            FailureAnalyzer.Limits limits) {
         Result r = new Result();
-        List<Path> ownClassDirs = ownClassDirs(project);
         List<Path> sourceRoots = sourceRoots(project);
-        DocumentBuilder db;
-        try {
-            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
-            f.setNamespaceAware(false);
-            f.setExpandEntityReferences(false);
-            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            db = f.newDocumentBuilder();
-        } catch (Exception e) {
+        DocumentBuilder db = documentBuilder();
+        if (db == null) {
             return r;
         }
         for (Path file : files) {
@@ -158,24 +152,40 @@ final class SurefireReports {
                 if (problem == null) {
                     continue;
                 }
-                if (r.failures.size() >= maxFailures) {
+                if (r.failures.size() >= limits.tests) {
                     r.omitted++;
                     continue;
                 }
-                r.failures.add(entry(tc, problem, kind, ownClassDirs, sourceRoots, paths, maxFrames, maxMessage));
+                r.failures.add(entry(tc, problem, kind, classDirs, sourceRoots, paths, limits));
             }
         }
         return r;
     }
 
-    private static List<Path> ownClassDirs(MavenProject p) {
+    /** Main and test output directories of {@code projects}; a failure often starts in a sibling module. */
+    static List<Path> classDirs(Collection<MavenProject> projects) {
         List<Path> dirs = new ArrayList<>();
-        dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
-        dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
+        for (MavenProject p : projects) {
+            dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
+            dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
+        }
         return dirs;
     }
 
-    private static List<Path> sourceRoots(MavenProject p) {
+    /** Plain parser for tool reports: no namespaces, no DTDs (nor the entities they could pull in); null if none. */
+    static DocumentBuilder documentBuilder() {
+        try {
+            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            f.setNamespaceAware(false);
+            f.setExpandEntityReferences(false);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            return f.newDocumentBuilder();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static List<Path> sourceRoots(MavenProject p) {
         List<Path> roots = new ArrayList<>();
         for (String s : p.getTestCompileSourceRoots()) {
             roots.add(Paths.get(s));
@@ -196,8 +206,7 @@ final class SurefireReports {
             List<Path> ownClassDirs,
             List<Path> sourceRoots,
             ReactorPaths paths,
-            int maxFrames,
-            int maxMessage) {
+            FailureAnalyzer.Limits limits) {
         String className = tc.getAttribute("classname");
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("test", className + "#" + tc.getAttribute("name"));
@@ -211,7 +220,7 @@ final class SurefireReports {
         if (message.isEmpty() && trace != null) {
             message = Text.firstLine(trace);
         }
-        m.put("message", Text.clip(message, maxMessage));
+        m.put("message", Text.clip(message, limits.message));
 
         List<String> frames = new ArrayList<>();
         String at = null;
@@ -229,7 +238,7 @@ final class SurefireReports {
                 if (at == null && (cls.equals(className) || cls.startsWith(className + "$"))) {
                     at = toSourcePath(cls, frame, sourceRoots, paths);
                 }
-                if (frames.size() < maxFrames) {
+                if (frames.size() < limits.frames) {
                     frames.add(stripModule(frame));
                 }
             }
@@ -240,7 +249,27 @@ final class SurefireReports {
         if (!frames.isEmpty()) {
             m.put("stack", frames);
         }
+        List<String> output = tail(text(tc, "system-out") + text(tc, "system-err"), limits);
+        if (!output.isEmpty()) {
+            m.put("output", output); // what the test printed; often the log line that explains the failure
+        }
         return m;
+    }
+
+    private static String text(Element tc, String name) {
+        Element e = firstChild(tc, name);
+        return e != null ? e.getTextContent() + "\n" : "";
+    }
+
+    /** The last {@code limits.output} non-blank lines, each clipped. */
+    private static List<String> tail(String s, FailureAnalyzer.Limits limits) {
+        List<String> lines = new ArrayList<>();
+        for (String line : s.split("\\R")) {
+            if (!line.trim().isEmpty()) {
+                lines.add(Text.clip(line, limits.message));
+            }
+        }
+        return new ArrayList<>(lines.subList(Math.max(0, lines.size() - limits.output), lines.size()));
     }
 
     /** "com.acme.Foo.bar(Foo.java:12)" -> "com.acme.Foo" */
@@ -299,7 +328,7 @@ final class SurefireReports {
         return loc;
     }
 
-    private static Element firstChild(Element parent, String name) {
+    static Element firstChild(Element parent, String name) {
         for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
             if (n instanceof Element && name.equals(n.getNodeName())) {
                 return (Element) n;
@@ -308,7 +337,7 @@ final class SurefireReports {
         return null;
     }
 
-    private static int intAttr(Element e, String name) {
+    static int intAttr(Element e, String name) {
         try {
             return Integer.parseInt(e.getAttribute(name).trim());
         } catch (NumberFormatException ex) {
