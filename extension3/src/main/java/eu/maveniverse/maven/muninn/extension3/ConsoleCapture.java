@@ -103,14 +103,17 @@ final class ConsoleCapture {
         try {
             ClassLoader cl =
                     org.slf4j.LoggerFactory.getILoggerFactory().getClass().getClassLoader();
-            Class<?> simpleLogger = loadSlf4j("SimpleLogger", cl);
+            Class<?> simpleLogger = loggerClass(cl);
             Field configField = simpleLogger.getDeclaredField("CONFIG_PARAMS");
             configField.setAccessible(true);
             Object config = configField.get(null);
             if (config == null) {
                 return false;
             }
-            Class<?> outputChoice = loadSlf4j("OutputChoice", cl);
+            Class<?> outputChoice = Class.forName(
+                    simpleLogger.getName().substring(0, simpleLogger.getName().lastIndexOf('.')) + ".OutputChoice",
+                    true,
+                    cl);
             Constructor<?> ctor = outputChoice.getDeclaredConstructor(PrintStream.class);
             ctor.setAccessible(true);
             Field choiceField = config.getClass().getDeclaredField("outputChoice");
@@ -118,17 +121,26 @@ final class ConsoleCapture {
             choiceField.set(config, ctor.newInstance(target));
             return true;
         } catch (Throwable t) {
-            return false; // different logging backend (e.g. Maven 4, logback); System.out swap still applies
+            return false; // different logging backend (e.g. logback); System.out swap still applies
         }
     }
 
-    /** maven-slf4j-provider keeps its logger in {@code org.slf4j.simple} on slf4j 2.x and {@code org.slf4j.impl} on 1.x. */
-    private static Class<?> loadSlf4j(String name, ClassLoader cl) throws ClassNotFoundException {
-        try {
-            return Class.forName("org.slf4j.simple." + name, true, cl);
-        } catch (ClassNotFoundException e) {
-            return Class.forName("org.slf4j.impl." + name, true, cl);
+    /**
+     * The logger class holding {@code CONFIG_PARAMS}: maven-slf4j-provider's {@code SimpleLogger} on Maven 3 (package
+     * {@code org.slf4j.simple} with slf4j 2.x, {@code org.slf4j.impl} with 1.x), maven-logging's
+     * {@code MavenBaseLogger} on Maven 4. Each has an {@code OutputChoice} class next to it.
+     */
+    private static Class<?> loggerClass(ClassLoader cl) throws ClassNotFoundException {
+        for (String name : new String[] {
+            "org.slf4j.simple.SimpleLogger", "org.slf4j.impl.SimpleLogger", "org.apache.maven.slf4j.MavenBaseLogger"
+        }) {
+            try {
+                return Class.forName(name, true, cl);
+            } catch (ClassNotFoundException e) {
+                // try the next layout
+            }
         }
+        throw new ClassNotFoundException("no known Maven logger");
     }
 
     boolean loggerRedirected() {
