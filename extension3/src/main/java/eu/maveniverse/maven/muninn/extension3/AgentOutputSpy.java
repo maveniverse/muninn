@@ -77,13 +77,13 @@ public class AgentOutputSpy extends AbstractEventSpy {
         long start;
         long end;
         boolean started;
-        long startMillis; // wall clock, to tell this build's test reports from stale ones
         long mojoStartMillis;
         MojoExecution lastMojo;
         MojoExecution failedMojo;
         Throwable failure;
         Map<String, Object> failureInfo;
-        int[] tests; // run, failed, errors, skipped; null if no test mojo ran
+        SurefireReports.Result tests; // null if no test mojo ran
+        Path testReports; // where the failing tests' reports are (or the last reports read)
 
         Module(MavenProject project, String id) {
             this.project = project;
@@ -185,7 +185,6 @@ public class AgentOutputSpy extends AbstractEventSpy {
             case ProjectStarted: {
                 Module m = module(e);
                 m.start = System.nanoTime();
-                m.startMillis = System.currentTimeMillis();
                 m.started = true;
                 break;
             }
@@ -219,26 +218,31 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
     }
 
-    /** Adds the totals of the surefire/failsafe reports this mojo execution wrote. */
+    /** Adds the surefire/failsafe reports this mojo execution wrote to the module's test results. */
     private void countTests(Module m, MojoExecution mojo) {
         String a = mojo.getArtifactId();
-        boolean fs = a.equals("maven-failsafe-plugin") && mojo.getGoal().equals("integration-test");
-        if (!fs && !(a.equals("maven-surefire-plugin") && mojo.getGoal().equals("test"))) {
+        boolean fs = a.contains("failsafe") && mojo.getGoal().equals("integration-test");
+        if (!fs && !(a.contains("surefire") && mojo.getGoal().equals("test"))) {
             return;
         }
         Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
         SurefireReports.Result r = SurefireReports.read(
-                dir, m.mojoStartMillis, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
+                SurefireReports.list(dir, m.mojoStartMillis),
+                m.project,
+                paths,
+                limits.tests,
+                limits.frames,
+                limits.message);
         if (r.run == 0) {
             return; // skipped (-DskipTests) or nothing matched: older reports in the directory are not ours
         }
         if (m.tests == null) {
-            m.tests = new int[4];
+            m.tests = new SurefireReports.Result();
         }
-        m.tests[0] += r.run;
-        m.tests[1] += r.failed;
-        m.tests[2] += r.errors;
-        m.tests[3] += r.skipped;
+        if (m.testReports == null || !r.failures.isEmpty()) {
+            m.testReports = dir;
+        }
+        m.tests.add(r, limits.tests);
     }
 
     /** The mojo's {@code reportsDirectory} if configured (expressions evaluated), else the plugin default. */
@@ -258,12 +262,12 @@ public class AgentOutputSpy extends AbstractEventSpy {
         return Paths.get(m.project.getBuild().getDirectory(), defaultName);
     }
 
-    private static Map<String, Object> testCounts(int[] t) {
+    private static Map<String, Object> testCounts(SurefireReports.Result t) {
         Map<String, Object> c = new LinkedHashMap<>();
-        c.put("run", t[0]);
-        c.put("failed", t[1]);
-        c.put("errors", t[2]);
-        c.put("skipped", t[3]);
+        c.put("run", t.run);
+        c.put("failed", t.failed);
+        c.put("errors", t.errors);
+        c.put("skipped", t.skipped);
         return c;
     }
 
@@ -299,8 +303,8 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (m.failure == null) {
                 m.failure = error;
             }
-            m.failureInfo = analyzer.analyzeModule(
-                    m.failure != null ? m.failure : error, m.project, m.failedMojo, m.startMillis);
+            m.failureInfo =
+                    analyzer.analyzeModule(m.failure != null ? m.failure : error, m.failedMojo, m.tests, m.testReports);
         }
         if (mode == Mode.NDJSON) {
             Map<String, Object> line = new LinkedHashMap<>();
@@ -389,17 +393,16 @@ public class AgentOutputSpy extends AbstractEventSpy {
             r.put("counts", counts);
         }
 
-        int[] total = new int[4];
-        boolean anyTests = false;
+        SurefireReports.Result total = null;
         for (Module m : modules.values()) {
             if (m.tests != null) {
-                anyTests = true;
-                for (int i = 0; i < 4; i++) {
-                    total[i] += m.tests[i];
+                if (total == null) {
+                    total = new SurefireReports.Result();
                 }
+                total.add(m.tests, 0);
             }
         }
-        if (anyTests) {
+        if (total != null) {
             r.put("tests", testCounts(total));
         }
 
@@ -503,7 +506,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     if (m.failureInfo == null) {
                         m.status = Status.FAILED;
                         m.failure = t;
-                        m.failureInfo = analyzer.analyzeModule(t, m.project, m.failedMojo, m.startMillis);
+                        m.failureInfo = analyzer.analyzeModule(t, m.failedMojo, m.tests, m.testReports);
                     }
                     continue;
                 }

@@ -183,6 +183,7 @@ class DemoIT {
                 report.get("tests").toString());
     }
 
+    /** core: failing tests in a custom reportsDirectory. */
     @Test
     void testFailures() {
         JsonNode core = module("core");
@@ -190,6 +191,7 @@ class DemoIT {
                 "{\"run\":4,\"failed\":1,\"errors\":1,\"skipped\":0}",
                 core.get("tests").toString());
         assertTrue(core.get("failures").get(0).get("at").asText().matches(".*ResolverTest\\.java:\\d+"));
+        assertTrue(core.get("reports").asText().endsWith("core/target/test-reports"), core.toString());
     }
 
     @Test

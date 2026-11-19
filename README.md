@@ -59,7 +59,7 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "at": "core/src/test/java/com/acme/core/ResolverTest.java:22",
         "stack": ["com.acme.core.Resolver.depth(Resolver.java:22)",
                   "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:22)"]}],
-     "reports": "core/target/surefire-reports"},
+     "reports": "core/target/test-reports"},
     {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
      "errors": [

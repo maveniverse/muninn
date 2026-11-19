@@ -8,7 +8,6 @@
 package eu.maveniverse.maven.muninn.extension3;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -23,7 +22,6 @@ import org.apache.maven.lifecycle.LifecycleExecutionException;
 import org.apache.maven.model.building.ModelProblem;
 import org.apache.maven.plugin.AbstractMojoExecutionException;
 import org.apache.maven.plugin.MojoExecution;
-import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.ProjectBuildingException;
 import org.apache.maven.project.ProjectBuildingResult;
 import org.eclipse.aether.collection.DependencyCollectionException;
@@ -50,8 +48,6 @@ final class FailureAnalyzer {
     private static final Pattern JAVADOC_LINE =
             Pattern.compile("^(?:.*?Exit code: \\d+ - )?(.+?\\.java):(\\d+): (error|warning): (.*)$");
 
-    private static final Pattern REPORTS_DIR = Pattern.compile("See (.+?) for the individual test results");
-
     private final ReactorPaths paths;
     private final Limits limits;
     private final boolean offline;
@@ -62,8 +58,11 @@ final class FailureAnalyzer {
         this.offline = offline;
     }
 
-    /** Failure of a module during the lifecycle; {@code since} is when the module started building. */
-    Map<String, Object> analyzeModule(Throwable error, MavenProject project, MojoExecution mojo, long since) {
+    /**
+     * Failure of a module during the lifecycle; {@code tests} are the module's test results read from
+     * {@code reports}, both null if no test mojo ran.
+     */
+    Map<String, Object> analyzeModule(Throwable error, MojoExecution mojo, SurefireReports.Result tests, Path reports) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (mojo != null) {
             m.put("phase", mojo.getLifecyclePhase());
@@ -106,34 +105,28 @@ final class FailureAnalyzer {
         }
 
         if (isTestFailure(cause, mojo)) {
-            Path reports = reportsDir(cause.getMessage(), project, mojo);
-            SurefireReports.Result r = SurefireReports.read(
-                    reports,
-                    since,
-                    ownClassDirs(project),
-                    sourceRoots(project),
-                    paths,
-                    limits.tests,
-                    limits.frames,
-                    limits.message);
             m.put("kind", "test");
-            Map<String, Object> counts = new LinkedHashMap<>();
-            counts.put("run", r.run);
-            counts.put("failed", r.failed);
-            counts.put("errors", r.errors);
-            counts.put("skipped", r.skipped);
-            m.put("tests", counts);
-            if (r.failures.isEmpty()) {
+            if (tests != null) {
+                Map<String, Object> counts = new LinkedHashMap<>();
+                counts.put("run", tests.run);
+                counts.put("failed", tests.failed);
+                counts.put("errors", tests.errors);
+                counts.put("skipped", tests.skipped);
+                m.put("tests", counts);
+            }
+            if (tests == null || tests.failures.isEmpty()) {
                 // Fork crash, timeout or no reports: the summary line is all we can say for sure.
                 m.put("summary", Text.clip(Text.firstLine(cause.getMessage()), limits.message));
             } else {
-                m.put("summary", (r.failed + r.errors) + " of " + r.run + " test(s) failed");
-                m.put("failures", r.failures);
-                if (r.omitted > 0) {
-                    m.put("omitted", r.omitted);
+                m.put("summary", (tests.failed + tests.errors) + " of " + tests.run + " test(s) failed");
+                m.put("failures", tests.failures);
+                if (tests.omitted > 0) {
+                    m.put("omitted", tests.omitted);
                 }
             }
-            m.put("reports", paths.rel(reports));
+            if (reports != null) {
+                m.put("reports", paths.rel(reports));
+            }
             return m;
         }
 
@@ -503,39 +496,6 @@ final class FailureAnalyzer {
         boolean surefire = a.contains("surefire") && "test".equals(goal);
         boolean failsafe = a.contains("failsafe") && ("integration-test".equals(goal) || "verify".equals(goal));
         return surefire || failsafe;
-    }
-
-    private static Path reportsDir(String message, MavenProject project, MojoExecution mojo) {
-        if (message != null) {
-            Matcher m = REPORTS_DIR.matcher(message);
-            if (m.find()) {
-                return Paths.get(m.group(1));
-            }
-        }
-        String name =
-                mojo != null && mojo.getArtifactId().contains("failsafe") ? "failsafe-reports" : "surefire-reports";
-        return Paths.get(project.getBuild().getDirectory(), name);
-    }
-
-    private static List<Path> ownClassDirs(MavenProject p) {
-        List<Path> dirs = new ArrayList<>();
-        dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
-        dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
-        return dirs;
-    }
-
-    private static List<Path> sourceRoots(MavenProject p) {
-        List<Path> roots = new ArrayList<>();
-        for (String s : p.getTestCompileSourceRoots()) {
-            roots.add(Paths.get(s));
-        }
-        for (String s : p.getCompileSourceRoots()) {
-            roots.add(Paths.get(s));
-        }
-        Path base = p.getBasedir().toPath();
-        roots.add(base.resolve("src/test/java"));
-        roots.add(base.resolve("src/main/java"));
-        return roots;
     }
 
     // ---- exception helpers --------------------------------------------------------------------

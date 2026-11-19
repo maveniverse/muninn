@@ -70,7 +70,7 @@ class FailureAnalyzerTest {
                 + "  symbol:   variable Joiner\n"
                 + "  location: class com.acme.util.Strings\n";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, 0);
+                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, null);
         assertEquals("compile", m.get("kind"));
         assertEquals("2 compilation error(s)", m.get("summary"));
         Map<String, Object> first = list(m, "errors").get(0);
@@ -85,7 +85,7 @@ class FailureAnalyzerTest {
     void compileFailureWithoutLocationKeepsTheMessage() {
         String longMessage = "Compilation failure\nwarnings found and -Werror specified";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, 0);
+                .analyzeModule(new MojoFailureException(this, "Compilation failure", longMessage), null, null, null);
         assertEquals("compile", m.get("kind"));
         assertEquals("warnings found and -Werror specified", m.get("summary"));
         assertNull(m.get("errors"));
@@ -110,7 +110,7 @@ class FailureAnalyzerTest {
                 + "1 warning\n"
                 + "Command line was: /usr/bin/javadoc @options @packages\n";
         Map<String, Object> m = analyzer(false)
-                .analyzeModule(new MojoFailureException(message), null, mojo("maven-javadoc-plugin", "javadoc"), 0);
+                .analyzeModule(new MojoFailureException(message), mojo("maven-javadoc-plugin", "javadoc"), null, null);
         assertEquals("javadoc", m.get("kind"));
         assertEquals("2 javadoc error(s), 1 warning(s)", m.get("summary"));
         Map<String, Object> first = list(m, "errors").get(0);
@@ -134,7 +134,7 @@ class FailureAnalyzerTest {
         r2.addException(
                 new ArtifactTransferException(secret, corp, "status code: 401, reason phrase: Unauthorized (401)"));
         Map<String, Object> m =
-                analyzer(false).analyzeModule(new ArtifactResolutionException(Arrays.asList(r1, r2)), null, null, 0);
+                analyzer(false).analyzeModule(new ArtifactResolutionException(Arrays.asList(r1, r2)), null, null, null);
         assertEquals("dependency", m.get("kind"));
         List<Map<String, Object>> entries = list(m, "missing");
         assertEquals("g:missing:jar:1", entries.get(0).get("artifact"));
