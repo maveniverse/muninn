@@ -408,6 +408,15 @@ class DemoIT {
         assertEquals(TOTALS_API, module(r, "api").get("tests").toString());
     }
 
+    /** Options can also come as system properties, e.g. from MAVEN_OPTS in an agent's environment. */
+    @Test
+    void optionsAlsoComeFromMavenOpts() throws Exception {
+        Map<String, String> env = noAgent();
+        env.put("MAVEN_OPTS", "-Dmuninn.output.verbose=true");
+        JsonNode r = mvn(demo, env, "-pl", "api", "verify", "-Dmuninn.output=json").report;
+        assertEquals(TOTALS_API, module(r, "api").get("tests").toString());
+    }
+
     @Test
     void failFastCollapsesModulesNeverStarted() throws Exception {
         JsonNode r = mvn(demo, noAgent(), "verify", "-Dmuninn.output=json").report;

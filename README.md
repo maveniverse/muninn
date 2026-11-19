@@ -30,6 +30,8 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
 | `-l <file>` | The extension stays inactive whatever the switches say: Maven's own log file is left as is |
 
+Every `-Dmuninn.output*` option can also be given as a system property, e.g. in `MAVEN_OPTS`; the command line wins.
+
 Exit codes are Maven's own; with `-fn` the report still says `FAILURE` when a module failed, though Maven exits 0. Two files are written under the top-level project's build directory (`target` unless customized):
 
 - `muninn-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue

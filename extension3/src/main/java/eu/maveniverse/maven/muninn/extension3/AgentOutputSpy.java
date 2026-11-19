@@ -121,10 +121,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Map<String, Object> data = context.getData();
         Properties user = (Properties) data.get("userProperties");
         Properties sys = (Properties) data.get("systemProperties");
-        String value = user != null ? user.getProperty(PROP) : null;
-        if (value == null && sys != null) {
-            value = sys.getProperty(PROP);
-        }
+        String value = prop(user, sys, PROP);
         if (value == null) {
             value = System.getenv(ENV);
         }
@@ -140,10 +137,10 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     .toAbsolutePath()
                     .normalize();
         }
-        verbose = user != null && Boolean.parseBoolean(user.getProperty(PROP + ".verbose"));
-        limits.diagnostics = intProp(user, PROP + ".maxErrors", limits.diagnostics);
-        limits.tests = intProp(user, PROP + ".maxTests", limits.tests);
-        limits.frames = intProp(user, PROP + ".maxFrames", limits.frames);
+        verbose = Boolean.parseBoolean(prop(user, sys, PROP + ".verbose"));
+        limits.diagnostics = intProp(prop(user, sys, PROP + ".maxErrors"), limits.diagnostics);
+        limits.tests = intProp(prop(user, sys, PROP + ".maxTests"), limits.tests);
+        limits.frames = intProp(prop(user, sys, PROP + ".maxFrames"), limits.frames);
         startNanos = System.nanoTime();
         startMillis = System.currentTimeMillis();
         try {
@@ -698,12 +695,18 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
     }
 
-    private static int intProp(Properties p, String key, int dflt) {
-        if (p == null || p.getProperty(key) == null) {
+    /** {@code -D} on the command line first, then system properties (e.g. from {@code MAVEN_OPTS}). */
+    private static String prop(Properties user, Properties sys, String key) {
+        String v = user != null ? user.getProperty(key) : null;
+        return v != null || sys == null ? v : sys.getProperty(key);
+    }
+
+    private static int intProp(String value, int dflt) {
+        if (value == null) {
             return dflt;
         }
         try {
-            return Math.max(0, Integer.parseInt(p.getProperty(key).trim()));
+            return Math.max(0, Integer.parseInt(value.trim()));
         } catch (NumberFormatException e) {
             return dflt;
         }
