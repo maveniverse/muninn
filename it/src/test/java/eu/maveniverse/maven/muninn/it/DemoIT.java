@@ -234,6 +234,25 @@ class DemoIT {
         assertTrue(run.out.contains("Non-readable settings"), run.out);
     }
 
+    /** The build passes, but the agent still needs to see which tests failed. */
+    @Test
+    void ignoredTestFailuresAreListed() throws Exception {
+        JsonNode r = mvn(
+                        demo,
+                        noAgent(),
+                        "-pl",
+                        "api,core",
+                        "verify",
+                        "-Dmaven.test.failure.ignore=true",
+                        "-Dmuninn.output=json")
+                .report;
+        assertEquals("SUCCESS", r.get("result").asText());
+        JsonNode core = module(r, "core");
+        assertEquals("OK", core.get("status").asText());
+        assertEquals(2, core.get("failures").size());
+        assertTrue(core.get("summary").asText().contains("ignored"), core.toString());
+    }
+
     /** Reports left by an earlier run are not this build's tests. */
     @Test
     void skippedTestsIgnoreStaleReports() throws Exception {

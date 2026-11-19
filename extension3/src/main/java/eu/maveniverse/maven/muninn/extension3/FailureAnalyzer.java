@@ -105,28 +105,8 @@ final class FailureAnalyzer {
         }
 
         if (isTestFailure(cause, mojo)) {
-            m.put("kind", "test");
-            if (tests != null) {
-                Map<String, Object> counts = new LinkedHashMap<>();
-                counts.put("run", tests.run);
-                counts.put("failed", tests.failed);
-                counts.put("errors", tests.errors);
-                counts.put("skipped", tests.skipped);
-                m.put("tests", counts);
-            }
-            if (tests == null || tests.failures.isEmpty()) {
-                // Fork crash, timeout or no reports: the summary line is all we can say for sure.
-                m.put("summary", Text.clip(Text.firstLine(cause.getMessage()), limits.message));
-            } else {
-                m.put("summary", (tests.failed + tests.errors) + " of " + tests.run + " test(s) failed");
-                m.put("failures", tests.failures);
-                if (tests.omitted > 0) {
-                    m.put("omitted", tests.omitted);
-                }
-            }
-            if (reports != null) {
-                m.put("reports", paths.rel(reports));
-            }
+            // Fork crash, timeout or no reports: the summary line is all we can say for sure.
+            tests(m, tests, reports, Text.clip(Text.firstLine(cause.getMessage()), limits.message));
             return m;
         }
 
@@ -480,6 +460,36 @@ final class FailureAnalyzer {
     }
 
     // ---- tests ------------------------------------------------------------------------------
+
+    /**
+     * Puts kind, counts, summary, failure entries and the reports directory into {@code m}. {@code fallback} is the
+     * summary when no failure entry was read; without one the summary is the counts.
+     */
+    void tests(Map<String, Object> m, SurefireReports.Result tests, Path reports, String fallback) {
+        m.put("kind", "test");
+        if (tests != null) {
+            Map<String, Object> counts = new LinkedHashMap<>();
+            counts.put("run", tests.run);
+            counts.put("failed", tests.failed);
+            counts.put("errors", tests.errors);
+            counts.put("skipped", tests.skipped);
+            m.put("tests", counts);
+        }
+        if (tests != null && (fallback == null || !tests.failures.isEmpty())) {
+            m.put("summary", (tests.failed + tests.errors) + " of " + tests.run + " test(s) failed");
+            if (!tests.failures.isEmpty()) {
+                m.put("failures", tests.failures);
+            }
+            if (tests.omitted > 0) {
+                m.put("omitted", tests.omitted);
+            }
+        } else {
+            m.put("summary", fallback);
+        }
+        if (reports != null) {
+            m.put("reports", paths.rel(reports));
+        }
+    }
 
     private static boolean isTestFailure(Throwable t, MojoExecution mojo) {
         String msg = t.getMessage() == null ? "" : t.getMessage();

@@ -82,7 +82,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         MojoExecution lastMojo;
         MojoExecution failedMojo;
         Throwable failure;
-        Map<String, Object> failureInfo;
+        Map<String, Object> failureInfo; // also for a successful module whose test failures the build ignored
         SurefireReports.Result tests; // null if no test mojo ran
         Path testReports; // where the failing tests' reports are (or the last reports read)
         final Map<Path, FileTime> countedReports = new HashMap<>(); // two executions may share a directory
@@ -307,6 +307,12 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
             m.failureInfo =
                     analyzer.analyzeModule(m.failure != null ? m.failure : error, m.failedMojo, m.tests, m.testReports);
+        } else if (status == Status.OK && m.tests != null && m.tests.failed + m.tests.errors > 0) {
+            // testFailureIgnore / -Dmaven.test.failure.ignore: the build passes, the failures still need fixing
+            Map<String, Object> info = new LinkedHashMap<>();
+            analyzer.tests(info, m.tests, m.testReports, null);
+            info.put("summary", info.get("summary") + "; the build ignored them (testFailureIgnore)");
+            m.failureInfo = info;
         }
         if (mode == Mode.NDJSON) {
             Map<String, Object> line = new LinkedHashMap<>();
@@ -419,7 +425,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 notBuilt.add(m.id); // one line for all of them; they share the same cause
                 continue;
             }
-            if (m.status == Status.OK && !verbose) {
+            if (m.status == Status.OK && !verbose && m.failureInfo == null) {
                 continue;
             }
             list.add(moduleEntry(m));
@@ -465,7 +471,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (m.started && m.status != Status.NOT_BUILT && seconds(m.end - m.start) >= 0.1) {
             e.put("time_s", seconds(m.end - m.start));
         }
-        if (m.status == Status.FAILED && m.failureInfo != null) {
+        if (m.failureInfo != null) {
             e.putAll(m.failureInfo);
         } else if (m.status == Status.SKIPPED) {
             e.put("cause", skipCause(m));

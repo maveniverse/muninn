@@ -99,6 +99,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 Other behaviour:
 
 - **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
+- **Ignored test failures:** with `testFailureIgnore` (or `-Dmaven.test.failure.ignore=true`) the build passes, but a module with failing tests is still listed, with status `OK`, `kind` `test` and its failures.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
 - **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`) and `!` deactivations, `-pl` with its `!` exclusions, `-N`, `-am`/`-amd`, `-fae`/`-fn`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
