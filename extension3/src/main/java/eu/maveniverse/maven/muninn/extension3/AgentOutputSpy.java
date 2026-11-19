@@ -10,6 +10,7 @@ package eu.maveniverse.maven.muninn.extension3;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -103,6 +104,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
     private MavenSession session;
     private MavenExecutionResult result;
     private long startNanos = System.nanoTime();
+    private long startMillis = System.currentTimeMillis();
     private final Map<MavenProject, Module> modules = new LinkedHashMap<>();
     private final List<Map<String, Object>> sessionErrors = new ArrayList<>();
     private ReactorPaths paths = new ReactorPaths(Paths.get("."));
@@ -143,6 +145,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         limits.tests = intProp(user, PROP + ".maxTests", limits.tests);
         limits.frames = intProp(user, PROP + ".maxFrames", limits.frames);
         startNanos = System.nanoTime();
+        startMillis = System.currentTimeMillis();
         try {
             capture = ConsoleCapture.start();
             out = capture.originalOut();
@@ -339,9 +342,10 @@ public class AgentOutputSpy extends AbstractEventSpy {
             return;
         }
         Path dir = buildDirectory().resolve("muninn-output");
+        String suffix = outputSuffix(dir, startMillis);
         Path log = null;
         if (capture != null) {
-            log = capture.moveTo(dir.resolve("build.log"));
+            log = capture.moveTo(dir.resolve("build" + suffix + ".log"));
         }
         String json;
         try {
@@ -359,12 +363,29 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         try {
             Files.createDirectories(dir);
-            Files.write(dir.resolve("report.json"), (json + "\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(dir.resolve("report" + suffix + ".json"), (json + "\n").getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) {
             // stdout is the primary channel; the file is a convenience
         }
         out.println(json);
         out.flush();
+    }
+
+    /**
+     * Empty, unless another build wrote {@code build.log} while this one ran (an agent building two modules side by
+     * side): then {@code -<pid>}, so neither build replaces the log the other one's report points to.
+     */
+    static String outputSuffix(Path dir, long startMillis) {
+        try {
+            // whole seconds: coarse file timestamps must not hide a concurrent build; a false hit only renames
+            if (Files.getLastModifiedTime(dir.resolve("build.log")).toMillis() < startMillis / 1000 * 1000) {
+                return "";
+            }
+        } catch (IOException e) {
+            return ""; // no earlier log
+        }
+        String jvm = ManagementFactory.getRuntimeMXBean().getName(); // "pid@host"
+        return "-" + jvm.substring(0, Math.max(0, jvm.indexOf('@')));
     }
 
     /** The top-level project's build directory (customizable); {@code target} if no project was loaded. */

@@ -8,8 +8,11 @@
 package eu.maveniverse.maven.muninn.extension3;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.Collections;
 import org.apache.maven.execution.DefaultMavenExecutionRequest;
@@ -37,6 +40,17 @@ class AgentOutputSpyTest {
         assertEquals(
                 "mvn clean verify -P'extra,!slow' -pl 'core,!it' -N -fn -D'skip it=a'\\''b' -rf :core",
                 AgentOutputSpy.resumeCommand(r, cwd, Collections.singletonList("corp"), "core"));
+    }
+
+    @Test
+    void outputGetsAPidSuffixOnlyWhenAnotherBuildWroteTheLogMeanwhile() throws Exception {
+        long start = System.currentTimeMillis();
+        assertEquals("", AgentOutputSpy.outputSuffix(cwd, start));
+        Path log = Files.write(cwd.resolve("build.log"), new byte[0]);
+        Files.setLastModifiedTime(log, FileTime.fromMillis(start - 60_000));
+        assertEquals("", AgentOutputSpy.outputSuffix(cwd, start));
+        Files.setLastModifiedTime(log, FileTime.fromMillis(start + 1000));
+        assertTrue(AgentOutputSpy.outputSuffix(cwd, start).matches("-\\d+"));
     }
 
     @Test

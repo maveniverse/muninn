@@ -35,6 +35,8 @@ Exit codes are Maven's own; with `-fn` the report still says `FAILURE` when a mo
 - `muninn-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
 - `muninn-output/report.json`: the same report as stdout
 
+If another build wrote `build.log` while this one ran (an agent building two modules side by side), both files get the process id as a suffix (`build-12345.log`, `report-12345.json`), so neither build replaces the log the other one's report points to; `log.path` in the report always names the real file.
+
 ## Example
 
 From the demo in `it/`: six modules with a test failure, a compile error, a missing dependency and two downstream modules, built with `-fae`. Shown pretty-printed and lightly trimmed; the real output is one line.
