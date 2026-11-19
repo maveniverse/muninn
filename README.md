@@ -13,7 +13,7 @@ Register it in `.mvn/extensions.xml` or, **as recommended user-wide extension in
   <extension>
     <groupId>eu.maveniverse.maven.muninn</groupId>
     <artifactId>extension3</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
   </extension>
 </extensions>
 ```
@@ -30,10 +30,14 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
 | `-l <file>` | The extension stays inactive whatever the switches say: Maven's own log file is left as is |
 
+Every `-Dmuninn.output*` option can also be given as a system property, e.g. in `MAVEN_OPTS`; the command line wins.
+
 Exit codes are Maven's own; with `-fn` the report still says `FAILURE` when a module failed, though Maven exits 0. Two files are written under the top-level project's build directory (`target` unless customized):
 
 - `muninn-output/build.log`: the complete console log, ANSI stripped, including Maven's error epilogue
 - `muninn-output/report.json`: the same report as stdout
+
+If another build wrote `build.log` while this one ran (an agent building two modules side by side), both files get the process id as a suffix (`build-12345.log`, `report-12345.json`), so neither build replaces the log the other one's report points to; `log.path` in the report always names the real file.
 
 ## Example
 
@@ -112,7 +116,7 @@ Other behaviour:
 - **Console capture:** Maven 3.9 ships `cacheOutputStream=true`, so the logger keeps the stdout it saw at startup and swapping `System.out` is not enough. The extension re-points maven-slf4j-provider's output target by reflection, which has the same effect as `-l <file>` decided after startup. It also swaps `System.out`/`System.err` for direct writers.
 - **Fallback:** if the reflection fails (different logging backend), the build log stays on the console, the report still prints at the end, and the report says `"captured": false`. If Maven exits without closing the spy (on 3.9, e.g. an invalid `settings.xml`), the captured log is printed to the console at exit instead of the report.
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
-- **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
+- **Dependencies:** Maven-provided APIs, a hand-written JSON writer, and one small runtime dependency, `eu.maveniverse.maven.shared:extension`, which checks the Maven and Java versions at startup; compiled for Java 8.
 
 Unit tests in `extension3/src/test` feed the parsers (compiler, javadoc, resolution failures, JSON) with message text captured from real plugin runs. The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
 

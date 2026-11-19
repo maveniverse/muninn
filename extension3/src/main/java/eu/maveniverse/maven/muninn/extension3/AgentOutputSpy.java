@@ -10,6 +10,7 @@ package eu.maveniverse.maven.muninn.extension3;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -103,6 +104,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
     private MavenSession session;
     private MavenExecutionResult result;
     private long startNanos = System.nanoTime();
+    private long startMillis = System.currentTimeMillis();
     private final Map<MavenProject, Module> modules = new LinkedHashMap<>();
     private final List<Map<String, Object>> sessionErrors = new ArrayList<>();
     private ReactorPaths paths = new ReactorPaths(Paths.get("."));
@@ -119,10 +121,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Map<String, Object> data = context.getData();
         Properties user = (Properties) data.get("userProperties");
         Properties sys = (Properties) data.get("systemProperties");
-        String value = user != null ? user.getProperty(PROP) : null;
-        if (value == null && sys != null) {
-            value = sys.getProperty(PROP);
-        }
+        String value = prop(user, sys, PROP);
         if (value == null) {
             value = System.getenv(ENV);
         }
@@ -138,11 +137,12 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     .toAbsolutePath()
                     .normalize();
         }
-        verbose = user != null && Boolean.parseBoolean(user.getProperty(PROP + ".verbose"));
-        limits.diagnostics = intProp(user, PROP + ".maxErrors", limits.diagnostics);
-        limits.tests = intProp(user, PROP + ".maxTests", limits.tests);
-        limits.frames = intProp(user, PROP + ".maxFrames", limits.frames);
+        verbose = Boolean.parseBoolean(prop(user, sys, PROP + ".verbose"));
+        limits.diagnostics = intProp(prop(user, sys, PROP + ".maxErrors"), limits.diagnostics);
+        limits.tests = intProp(prop(user, sys, PROP + ".maxTests"), limits.tests);
+        limits.frames = intProp(prop(user, sys, PROP + ".maxFrames"), limits.frames);
         startNanos = System.nanoTime();
+        startMillis = System.currentTimeMillis();
         try {
             capture = ConsoleCapture.start();
             out = capture.originalOut();
@@ -339,9 +339,10 @@ public class AgentOutputSpy extends AbstractEventSpy {
             return;
         }
         Path dir = buildDirectory().resolve("muninn-output");
+        String suffix = outputSuffix(dir, startMillis);
         Path log = null;
         if (capture != null) {
-            log = capture.moveTo(dir.resolve("build.log"));
+            log = capture.moveTo(dir.resolve("build" + suffix + ".log"));
         }
         String json;
         try {
@@ -359,12 +360,29 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         try {
             Files.createDirectories(dir);
-            Files.write(dir.resolve("report.json"), (json + "\n").getBytes(StandardCharsets.UTF_8));
+            Files.write(dir.resolve("report" + suffix + ".json"), (json + "\n").getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) {
             // stdout is the primary channel; the file is a convenience
         }
         out.println(json);
         out.flush();
+    }
+
+    /**
+     * Empty, unless another build wrote {@code build.log} while this one ran (an agent building two modules side by
+     * side): then {@code -<pid>}, so neither build replaces the log the other one's report points to.
+     */
+    static String outputSuffix(Path dir, long startMillis) {
+        try {
+            // whole seconds: coarse file timestamps must not hide a concurrent build; a false hit only renames
+            if (Files.getLastModifiedTime(dir.resolve("build.log")).toMillis() < startMillis / 1000 * 1000) {
+                return "";
+            }
+        } catch (IOException e) {
+            return ""; // no earlier log
+        }
+        String jvm = ManagementFactory.getRuntimeMXBean().getName(); // "pid@host"
+        return "-" + jvm.substring(0, Math.max(0, jvm.indexOf('@')));
     }
 
     /** The top-level project's build directory (customizable); {@code target} if no project was loaded. */
@@ -677,12 +695,18 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
     }
 
-    private static int intProp(Properties p, String key, int dflt) {
-        if (p == null || p.getProperty(key) == null) {
+    /** {@code -D} on the command line first, then system properties (e.g. from {@code MAVEN_OPTS}). */
+    private static String prop(Properties user, Properties sys, String key) {
+        String v = user != null ? user.getProperty(key) : null;
+        return v != null || sys == null ? v : sys.getProperty(key);
+    }
+
+    private static int intProp(String value, int dflt) {
+        if (value == null) {
             return dflt;
         }
         try {
-            return Math.max(0, Integer.parseInt(p.getProperty(key).trim()));
+            return Math.max(0, Integer.parseInt(value.trim()));
         } catch (NumberFormatException e) {
             return dflt;
         }
