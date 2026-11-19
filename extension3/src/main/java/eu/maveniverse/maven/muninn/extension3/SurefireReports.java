@@ -124,14 +124,8 @@ final class SurefireReports {
             FailureAnalyzer.Limits limits) {
         Result r = new Result();
         List<Path> sourceRoots = sourceRoots(project);
-        DocumentBuilder db;
-        try {
-            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
-            f.setNamespaceAware(false);
-            f.setExpandEntityReferences(false);
-            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            db = f.newDocumentBuilder();
-        } catch (Exception e) {
+        DocumentBuilder db = documentBuilder();
+        if (db == null) {
             return r;
         }
         for (Path file : files) {
@@ -178,7 +172,20 @@ final class SurefireReports {
         return dirs;
     }
 
-    private static List<Path> sourceRoots(MavenProject p) {
+    /** Plain parser for tool reports: no namespaces, no DTDs (nor the entities they could pull in); null if none. */
+    static DocumentBuilder documentBuilder() {
+        try {
+            DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+            f.setNamespaceAware(false);
+            f.setExpandEntityReferences(false);
+            f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            return f.newDocumentBuilder();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    static List<Path> sourceRoots(MavenProject p) {
         List<Path> roots = new ArrayList<>();
         for (String s : p.getTestCompileSourceRoots()) {
             roots.add(Paths.get(s));
@@ -321,7 +328,7 @@ final class SurefireReports {
         return loc;
     }
 
-    private static Element firstChild(Element parent, String name) {
+    static Element firstChild(Element parent, String name) {
         for (Node n = parent.getFirstChild(); n != null; n = n.getNextSibling()) {
             if (n instanceof Element && name.equals(n.getNodeName())) {
                 return (Element) n;
@@ -330,7 +337,7 @@ final class SurefireReports {
         return null;
     }
 
-    private static int intAttr(Element e, String name) {
+    static int intAttr(Element e, String name) {
         try {
             return Integer.parseInt(e.getAttribute(name).trim());
         } catch (NumberFormatException ex) {

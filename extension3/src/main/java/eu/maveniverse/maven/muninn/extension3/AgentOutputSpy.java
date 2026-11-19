@@ -231,7 +231,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (!fs && !(a.contains("surefire") && mojo.getGoal().equals("test"))) {
             return;
         }
-        Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
+        Path dir = configuredPath(
+                m,
+                mojo,
+                "reportsDirectory",
+                Paths.get(m.project.getBuild().getDirectory(), fs ? "failsafe-reports" : "surefire-reports"));
         SurefireReports.Result r = SurefireReports.read(
                 SurefireReports.list(dir, m.mojoStartMillis, m.countedReports),
                 m.project,
@@ -258,10 +262,10 @@ public class AgentOutputSpy extends AbstractEventSpy {
         return reactorClassDirs;
     }
 
-    /** The mojo's {@code reportsDirectory} if configured (expressions evaluated), else the plugin default. */
-    private Path reportsDir(Module m, MojoExecution mojo, String defaultName) {
+    /** The mojo's path parameter {@code name} if configured (expressions evaluated), else the plugin default. */
+    private Path configuredPath(Module m, MojoExecution mojo, String name, Path dflt) {
         Xpp3Dom cfg = mojo.getConfiguration();
-        Xpp3Dom child = cfg != null ? cfg.getChild("reportsDirectory") : null;
+        Xpp3Dom child = cfg != null ? cfg.getChild(name) : null;
         if (child != null && child.getValue() != null && session != null) {
             try {
                 Object v = new PluginParameterExpressionEvaluator(session, mojo).evaluate(child.getValue());
@@ -269,10 +273,24 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     return m.project.getBasedir().toPath().resolve(v.toString());
                 }
             } catch (Exception ignored) {
-                // fall back to the default directory
+                // fall back to the default
             }
         }
-        return Paths.get(m.project.getBuild().getDirectory(), defaultName);
+        return dflt;
+    }
+
+    /** Where a Checkstyle, PMD or SpotBugs check goal found its violations. */
+    private Path lintReport(Module m, MojoExecution mojo, String tool) {
+        Path target = Paths.get(m.project.getBuild().getDirectory());
+        switch (tool) {
+            case "checkstyle":
+                return configuredPath(m, mojo, "outputFile", target.resolve("checkstyle-result.xml"));
+            case "pmd":
+                return configuredPath(m, mojo, "targetDirectory", target).resolve("pmd.xml");
+            default:
+                return configuredPath(m, mojo, "spotbugsXmlOutputDirectory", target)
+                        .resolve("spotbugsXml.xml");
+        }
     }
 
     private static Map<String, Object> testCounts(SurefireReports.Result t) {
@@ -318,6 +336,15 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
             m.failureInfo = analyzer.analyzeModule(
                     m.failure != null ? m.failure : error, m.project, m.failedMojo, m.tests, m.testReports);
+            String tool = LintReports.tool(m.failedMojo);
+            Map<String, Object> lint = tool != null
+                    ? LintReports.read(tool, lintReport(m, m.failedMojo, tool), m.project, paths, limits)
+                    : null;
+            if (lint != null) {
+                // the check's message is only a count; the report has the violations
+                m.failureInfo.keySet().retainAll(Arrays.asList("phase", "mojo"));
+                m.failureInfo.putAll(lint);
+            }
         } else if (status == Status.OK && m.tests != null && m.tests.failed + m.tests.errors > 0) {
             // testFailureIgnore / -Dmaven.test.failure.ignore: the build passes, the failures still need fixing
             Map<String, Object> info = new LinkedHashMap<>();

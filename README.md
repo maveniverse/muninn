@@ -102,6 +102,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 | `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
 | `format` | Check goals of Spotless, fmt, formatter, impsort, sortpom, prettier, license (com.mycila) and tidy | First line of the message, the files Spotless lists, and `fix`: the command that runs the plugin's fixing goal on the module (e.g. `mvn spotless:apply -pl :core`) |
 | `enforcer` | maven-enforcer-plugin 3.x exception message | Each failed rule (`RequireJavaVersion`, `BannedDependencies`, ...) with its message; older enforcers that only log the rules fall back to `mojo` |
+| `lint` | `check` goals of maven-checkstyle-plugin, maven-pmd-plugin and spotbugs-maven-plugin, from their XML reports (`checkstyle-result.xml`, `pmd.xml`, `spotbugsXml.xml`; configured locations honored) | `tool`, then each violation with file, line, column, rule and message; capped by `maxErrors` |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |
 | `mojo` / `build` | Anything else | Deepest non-empty exception message, plus the exception class |
 

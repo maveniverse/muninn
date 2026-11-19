@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pmd xmlns="http://pmd.sourceforge.net/report/2.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pmd.sourceforge.net/report/2.0.0 https://pmd.github.io/schema/report_2_0_0.xsd" version="7.17.0" timestamp="2026-11-19T13:17:48.786">
+<file name="/ROOT/lint/src/main/java/p/Bad.java">
+<violation beginline="3" endline="3" begincolumn="1" endcolumn="23" rule="UnnecessaryImport" ruleset="Code Style" package="p" class="Bad" externalInfoUrl="https://docs.pmd-code.org/pmd-doc-7.17.0/pmd_rules_java_codestyle.html#unnecessaryimport" priority="4">
+Unused import 'java.util.List'
+</violation>
+</file>
+</pmd>
