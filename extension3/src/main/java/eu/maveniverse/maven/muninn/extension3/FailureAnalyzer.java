@@ -366,9 +366,7 @@ final class FailureAnalyzer {
                 current.put("col", Integer.parseInt(m.group(3)));
                 current.put("message", Text.clip(m.group(4), limits.message));
                 detail = new ArrayList<>();
-                if (!out.contains(current)) {
-                    out.add(current);
-                }
+                out.add(current);
             } else if (current != null && !line.trim().isEmpty() && line.startsWith(" ")) {
                 detail.add(line.trim().replaceAll("\\s+", " "));
             }
