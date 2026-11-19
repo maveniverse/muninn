@@ -13,4 +13,15 @@
   <parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>1.0-SNAPSHOT</version></parent>
   <artifactId>core</artifactId>
   <dependencies><dependency><groupId>com.acme</groupId><artifactId>api</artifactId><version>1.0-SNAPSHOT</version></dependency></dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <!-- failing tests in a non-default reports directory: the failures must still be found -->
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <reportsDirectory>${project.build.directory}/test-reports</reportsDirectory>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>

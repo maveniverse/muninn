@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -18,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.apache.maven.project.MavenProject;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -64,39 +67,63 @@ final class SurefireReports {
         int skipped;
         int omitted;
         final List<Map<String, Object>> failures = new ArrayList<>();
+
+        /** Adds another execution's results, keeping at most {@code maxFailures} failure entries. */
+        void add(Result other, int maxFailures) {
+            run += other.run;
+            failed += other.failed;
+            errors += other.errors;
+            skipped += other.skipped;
+            omitted += other.omitted;
+            for (Map<String, Object> f : other.failures) {
+                if (failures.size() < maxFailures) {
+                    failures.add(f);
+                } else {
+                    omitted++;
+                }
+            }
+        }
     }
 
     /**
-     * @param reportsDir   target/surefire-reports or target/failsafe-reports
-     * @param since        epoch millis; older reports are leftovers of earlier builds and are ignored
-     * @param ownClassDirs the module's output dirs; frames from classes found there are "ours"
-     * @param sourceRoots  main + test source roots, to turn a frame into a file path
-     * @param paths        relativizes absolute paths for the report
+     * The {@code TEST-*.xml} files in {@code reportsDir} written since {@code since} (epoch millis); older ones are
+     * leftovers of earlier builds. Files already in {@code seen} with the same timestamp were counted by an earlier
+     * execution in this module and are skipped; the listed ones are added to it.
      */
-    static Result read(
-            Path reportsDir,
-            long since,
-            List<Path> ownClassDirs,
-            List<Path> sourceRoots,
-            ReactorPaths paths,
-            int maxFailures,
-            int maxFrames,
-            int maxMessage) {
-        Result r = new Result();
+    static List<Path> list(Path reportsDir, long since, Map<Path, FileTime> seen) {
         List<Path> files = new ArrayList<>();
         // ponytail: whole-second cutoff covers filesystems with 1s mtime granularity; a report written in
         // the same second just before this build started still slips through
         long cutoff = since / 1000 * 1000;
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(reportsDir, "TEST-*.xml")) {
             for (Path f : ds) {
-                if (Files.getLastModifiedTime(f).toMillis() >= cutoff) {
+                FileTime t = Files.getLastModifiedTime(f);
+                if (t.toMillis() >= cutoff && !t.equals(seen.put(f, t))) {
                     files.add(f);
                 }
             }
         } catch (IOException e) {
-            return r; // no reports directory: nothing ran, or a different layout
+            return files; // no reports directory: nothing ran, or a different layout
         }
         files.sort(Comparator.naturalOrder());
+        return files;
+    }
+
+    /**
+     * @param files   report files, see {@link #list}
+     * @param project the module: frames from its classes are "ours", its source roots locate them
+     * @param paths   relativizes absolute paths for the report
+     */
+    static Result read(
+            List<Path> files,
+            MavenProject project,
+            ReactorPaths paths,
+            int maxFailures,
+            int maxFrames,
+            int maxMessage) {
+        Result r = new Result();
+        List<Path> ownClassDirs = ownClassDirs(project);
+        List<Path> sourceRoots = sourceRoots(project);
         DocumentBuilder db;
         try {
             DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
@@ -139,6 +166,27 @@ final class SurefireReports {
             }
         }
         return r;
+    }
+
+    private static List<Path> ownClassDirs(MavenProject p) {
+        List<Path> dirs = new ArrayList<>();
+        dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
+        dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
+        return dirs;
+    }
+
+    private static List<Path> sourceRoots(MavenProject p) {
+        List<Path> roots = new ArrayList<>();
+        for (String s : p.getTestCompileSourceRoots()) {
+            roots.add(Paths.get(s));
+        }
+        for (String s : p.getCompileSourceRoots()) {
+            roots.add(Paths.get(s));
+        }
+        Path base = p.getBasedir().toPath();
+        roots.add(base.resolve("src/test/java"));
+        roots.add(base.resolve("src/main/java"));
+        return roots;
     }
 
     private static Map<String, Object> entry(

@@ -1,0 +1,48 @@
+/*
+ * Copyright (c) 2026 Maveniverse Org.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v2.0
+ * which accompanies this distribution, and is available at
+ * https://www.eclipse.org/legal/epl-v20.html
+ */
+package eu.maveniverse.maven.muninn.extension3;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
+import org.apache.maven.execution.DefaultMavenExecutionRequest;
+import org.apache.maven.execution.MavenExecutionRequest;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class AgentOutputSpyTest {
+
+    @TempDir
+    Path cwd;
+
+    @Test
+    void resumeKeepsExclusionsAndReactorFlags() {
+        MavenExecutionRequest r = new DefaultMavenExecutionRequest();
+        r.setGoals(Arrays.asList("clean", "verify"));
+        r.setActiveProfiles(Arrays.asList("extra", "corp"));
+        r.setInactiveProfiles(Collections.singletonList("slow"));
+        r.setSelectedProjects(Collections.singletonList("core"));
+        r.setExcludedProjects(Collections.singletonList("it"));
+        r.setRecursive(false);
+        r.setReactorFailureBehavior(MavenExecutionRequest.REACTOR_FAIL_NEVER);
+        r.getUserProperties().setProperty("skip it", "a'b");
+        r.getUserProperties().setProperty("muninn.output", "json");
+        assertEquals(
+                "mvn clean verify -P'extra,!slow' -pl 'core,!it' -N -fn -D'skip it=a'\\''b' -rf :core",
+                AgentOutputSpy.resumeCommand(r, cwd, Collections.singletonList("corp"), "core"));
+    }
+
+    @Test
+    void ambiguousModuleKeepsGroupId() {
+        MavenExecutionRequest r = new DefaultMavenExecutionRequest();
+        r.setGoals(Collections.singletonList("install"));
+        assertEquals("mvn install -rf g:x", AgentOutputSpy.resumeCommand(r, cwd, Collections.emptyList(), "g:x"));
+    }
+}

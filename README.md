@@ -59,7 +59,7 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "at": "core/src/test/java/com/acme/core/ResolverTest.java:22",
         "stack": ["com.acme.core.Resolver.depth(Resolver.java:22)",
                   "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:22)"]}],
-     "reports": "core/target/surefire-reports"},
+     "reports": "core/target/test-reports"},
     {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
      "errors": [
@@ -99,9 +99,10 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 Other behaviour:
 
 - **Test totals:** the top-level `tests` object (`run`, `failed`, `errors`, `skipped`) sums the surefire and failsafe reports of all modules, passing ones included; each module entry carries its own (passing modules only with `verbose`). Only `surefire:test` and `failsafe:integration-test` count (a configured `reportsDirectory` is honored), and only report files written during this build: leftovers from earlier runs (e.g. with `-DskipTests`) are ignored.
+- **Ignored test failures:** with `testFailureIgnore` (or `-Dmaven.test.failure.ignore=true`) the build passes, but a module with failing tests is still listed, with status `OK`, `kind` `test` and its failures.
 - **Downstream modules:** skipped modules name the failed upstream module.
 - **Fail-fast:** modules never started are collapsed into one `not_built` entry, with a note to add `-fae`.
-- **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`), `-pl`, `-am`/`-amd`, `-fae`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
+- **Resume command:** `resume` rebuilds the command from the request, including goals, `-f`, `-s`, `-gs`, command-line profiles (not those activated by `settings.xml`) and `!` deactivations, `-pl` with its `!` exclusions, `-N`, `-am`/`-amd`, `-fae`/`-fn`, `-o`, `-U`, `-T`, `-b` and `-D` properties. `-rf` names the module as `groupId:artifactId` when its artifactId alone is ambiguous.
 - **Batch mode:** while active, the build runs non-interactively even without `-B`, since a prompt would go to the log and the build would wait for input nobody sees.
 - **One copy at a time:** if the extension is registered twice (user-wide and per project), the first copy to start does the work and the other stays inactive.
 
@@ -113,7 +114,7 @@ Other behaviour:
 - **Log placement:** the log goes to a temp file first, because `mvn clean` deletes `target/` during the build. It moves to `target/muninn-output/build.log` at the end, and Maven's error epilogue, printed after the spy closes, is appended there.
 - **No dependencies:** only Maven-provided APIs and a hand-written JSON writer, compiled for Java 8.
 
-The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
+Unit tests in `extension3/src/test` feed the parsers (compiler, javadoc, resolution failures, JSON) with message text captured from real plugin runs. The `it` module runs the six-module reactor in `it/src/test/projects/demo` with the real compiler and surefire plugins and the just-built extension (`-Dmaven.ext.class.path`), and asserts on the report. `DemoIT` runs under failsafe only with `-Prun-its`.
 
 ## Tested
 
@@ -138,8 +139,7 @@ The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and 
 - **Compiler warnings:** only counted today; a capped list could be useful.
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
-- **Fixtures for javadoc and `via`:** the javadoc parser has not been run against real maven-javadoc-plugin output, and the demo has no javadoc case.
-- **Automated tests:** there is no `src/test`; verification is the `it` module (`DemoIT`, 18 tests) only.
+- **Fixtures for `via`:** the demo covers one transitive path only; the javadoc parser is unit-tested against captured maven-javadoc-plugin 3.12.0 output, but the demo has no javadoc case.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build

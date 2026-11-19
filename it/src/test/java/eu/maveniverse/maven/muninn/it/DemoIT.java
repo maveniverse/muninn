@@ -183,6 +183,7 @@ class DemoIT {
                 report.get("tests").toString());
     }
 
+    /** core: failing tests in a custom reportsDirectory. */
     @Test
     void testFailures() {
         JsonNode core = module("core");
@@ -190,6 +191,7 @@ class DemoIT {
                 "{\"run\":4,\"failed\":1,\"errors\":1,\"skipped\":0}",
                 core.get("tests").toString());
         assertTrue(core.get("failures").get(0).get("at").asText().matches(".*ResolverTest\\.java:\\d+"));
+        assertTrue(core.get("reports").asText().endsWith("core/target/test-reports"), core.toString());
     }
 
     @Test
@@ -230,6 +232,25 @@ class DemoIT {
         write(bad, "<settings><broken");
         Run run = mvn(demo, noAgent(), "-gs", bad.toString(), "-pl", "api", "validate", "-Dmuninn.output=json");
         assertTrue(run.out.contains("Non-readable settings"), run.out);
+    }
+
+    /** The build passes, but the agent still needs to see which tests failed. */
+    @Test
+    void ignoredTestFailuresAreListed() throws Exception {
+        JsonNode r = mvn(
+                        demo,
+                        noAgent(),
+                        "-pl",
+                        "api,core",
+                        "verify",
+                        "-Dmaven.test.failure.ignore=true",
+                        "-Dmuninn.output=json")
+                .report;
+        assertEquals("SUCCESS", r.get("result").asText());
+        JsonNode core = module(r, "core");
+        assertEquals("OK", core.get("status").asText());
+        assertEquals(2, core.get("failures").size());
+        assertTrue(core.get("summary").asText().contains("ignored"), core.toString());
     }
 
     /** Reports left by an earlier run are not this build's tests. */
@@ -284,7 +305,10 @@ class DemoIT {
         assertTrue(read(log).contains("BUILD SUCCESS"));
     }
 
-    /** -f, -s, -gs, -U and CLI profiles survive; settings profiles do not; a duplicate artifactId gets its groupId. */
+    /**
+     * -f, -s, -gs, -U, CLI profiles and "!" exclusions survive; settings profiles do not; a duplicate artifactId
+     * gets its groupId.
+     */
     @Test
     void resumeKeepsWhatTheUserTyped() throws Exception {
         Path dup = work.resolve("dup");
@@ -292,7 +316,7 @@ class DemoIT {
                 Files.createDirectories(dup).resolve("pom.xml"),
                 "<project><modelVersion>4.0.0</modelVersion><groupId>p</groupId><artifactId>parent</artifactId>"
                         + "<version>1</version><packaging>pom</packaging><modules><module>a</module>"
-                        + "<module>b</module></modules></project>");
+                        + "<module>b</module><module>c</module></modules></project>");
         for (String m : new String[] {"a", "b"}) {
             write(
                     Files.createDirectories(dup.resolve(m)).resolve("pom.xml"),
@@ -300,6 +324,10 @@ class DemoIT {
                             + "<artifactId>x</artifactId><version>1</version><properties>"
                             + "<maven.compiler.release>11</maven.compiler.release></properties></project>");
         }
+        write(
+                Files.createDirectories(dup.resolve("c")).resolve("pom.xml"),
+                "<project><modelVersion>4.0.0</modelVersion><groupId>gc</groupId><artifactId>c</artifactId>"
+                        + "<version>1</version></project>");
         Path src = Files.createDirectories(dup.resolve("b/src/main/java"));
         write(src.resolve("Bad.java"), "class Bad { int x = \"a\"; }");
         write(work.resolve("global-settings.xml"), "<settings/>");
@@ -311,7 +339,9 @@ class DemoIT {
                         "-gs",
                         "global-settings.xml",
                         "-U",
-                        "-Pextra",
+                        "-Pextra,!nothing",
+                        "-pl",
+                        "!c",
                         "compile",
                         "-Dmuninn.output=json")
                 .report;
@@ -319,7 +349,8 @@ class DemoIT {
         assertTrue(resume.contains(" -f dup/pom.xml"), resume);
         assertTrue(resume.contains(" -s settings.xml"), resume);
         assertTrue(resume.contains(" -gs global-settings.xml"), resume);
-        assertTrue(resume.contains(" -Pextra"), resume);
+        assertTrue(resume.contains(" -P'extra,!nothing'"), resume);
+        assertTrue(resume.contains(" -pl '!c'"), resume);
         assertFalse(resume.contains("corp"), resume);
         assertTrue(resume.contains(" -U"), resume);
         assertTrue(resume.endsWith(" -rf gb:x"), resume);

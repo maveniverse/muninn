@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -77,13 +78,14 @@ public class AgentOutputSpy extends AbstractEventSpy {
         long start;
         long end;
         boolean started;
-        long startMillis; // wall clock, to tell this build's test reports from stale ones
         long mojoStartMillis;
         MojoExecution lastMojo;
         MojoExecution failedMojo;
         Throwable failure;
-        Map<String, Object> failureInfo;
-        int[] tests; // run, failed, errors, skipped; null if no test mojo ran
+        Map<String, Object> failureInfo; // also for a successful module whose test failures the build ignored
+        SurefireReports.Result tests; // null if no test mojo ran
+        Path testReports; // where the failing tests' reports are (or the last reports read)
+        final Map<Path, FileTime> countedReports = new HashMap<>(); // two executions may share a directory
 
         Module(MavenProject project, String id) {
             this.project = project;
@@ -185,7 +187,6 @@ public class AgentOutputSpy extends AbstractEventSpy {
             case ProjectStarted: {
                 Module m = module(e);
                 m.start = System.nanoTime();
-                m.startMillis = System.currentTimeMillis();
                 m.started = true;
                 break;
             }
@@ -219,26 +220,31 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
     }
 
-    /** Adds the totals of the surefire/failsafe reports this mojo execution wrote. */
+    /** Adds the surefire/failsafe reports this mojo execution wrote to the module's test results. */
     private void countTests(Module m, MojoExecution mojo) {
         String a = mojo.getArtifactId();
-        boolean fs = a.equals("maven-failsafe-plugin") && mojo.getGoal().equals("integration-test");
-        if (!fs && !(a.equals("maven-surefire-plugin") && mojo.getGoal().equals("test"))) {
+        boolean fs = a.contains("failsafe") && mojo.getGoal().equals("integration-test");
+        if (!fs && !(a.contains("surefire") && mojo.getGoal().equals("test"))) {
             return;
         }
         Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
         SurefireReports.Result r = SurefireReports.read(
-                dir, m.mojoStartMillis, Collections.emptyList(), Collections.emptyList(), paths, 0, 0, 0);
+                SurefireReports.list(dir, m.mojoStartMillis, m.countedReports),
+                m.project,
+                paths,
+                limits.tests,
+                limits.frames,
+                limits.message);
         if (r.run == 0) {
             return; // skipped (-DskipTests) or nothing matched: older reports in the directory are not ours
         }
         if (m.tests == null) {
-            m.tests = new int[4];
+            m.tests = new SurefireReports.Result();
         }
-        m.tests[0] += r.run;
-        m.tests[1] += r.failed;
-        m.tests[2] += r.errors;
-        m.tests[3] += r.skipped;
+        if (m.testReports == null || !r.failures.isEmpty()) {
+            m.testReports = dir;
+        }
+        m.tests.add(r, limits.tests);
     }
 
     /** The mojo's {@code reportsDirectory} if configured (expressions evaluated), else the plugin default. */
@@ -258,12 +264,12 @@ public class AgentOutputSpy extends AbstractEventSpy {
         return Paths.get(m.project.getBuild().getDirectory(), defaultName);
     }
 
-    private static Map<String, Object> testCounts(int[] t) {
+    private static Map<String, Object> testCounts(SurefireReports.Result t) {
         Map<String, Object> c = new LinkedHashMap<>();
-        c.put("run", t[0]);
-        c.put("failed", t[1]);
-        c.put("errors", t[2]);
-        c.put("skipped", t[3]);
+        c.put("run", t.run);
+        c.put("failed", t.failed);
+        c.put("errors", t.errors);
+        c.put("skipped", t.skipped);
         return c;
     }
 
@@ -299,8 +305,14 @@ public class AgentOutputSpy extends AbstractEventSpy {
             if (m.failure == null) {
                 m.failure = error;
             }
-            m.failureInfo = analyzer.analyzeModule(
-                    m.failure != null ? m.failure : error, m.project, m.failedMojo, m.startMillis);
+            m.failureInfo =
+                    analyzer.analyzeModule(m.failure != null ? m.failure : error, m.failedMojo, m.tests, m.testReports);
+        } else if (status == Status.OK && m.tests != null && m.tests.failed + m.tests.errors > 0) {
+            // testFailureIgnore / -Dmaven.test.failure.ignore: the build passes, the failures still need fixing
+            Map<String, Object> info = new LinkedHashMap<>();
+            analyzer.tests(info, m.tests, m.testReports, null);
+            info.put("summary", info.get("summary") + "; the build ignored them (testFailureIgnore)");
+            m.failureInfo = info;
         }
         if (mode == Mode.NDJSON) {
             Map<String, Object> line = new LinkedHashMap<>();
@@ -389,17 +401,16 @@ public class AgentOutputSpy extends AbstractEventSpy {
             r.put("counts", counts);
         }
 
-        int[] total = new int[4];
-        boolean anyTests = false;
+        SurefireReports.Result total = null;
         for (Module m : modules.values()) {
             if (m.tests != null) {
-                anyTests = true;
-                for (int i = 0; i < 4; i++) {
-                    total[i] += m.tests[i];
+                if (total == null) {
+                    total = new SurefireReports.Result();
                 }
+                total.add(m.tests, 0);
             }
         }
-        if (anyTests) {
+        if (total != null) {
             r.put("tests", testCounts(total));
         }
 
@@ -414,7 +425,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 notBuilt.add(m.id); // one line for all of them; they share the same cause
                 continue;
             }
-            if (m.status == Status.OK && !verbose) {
+            if (m.status == Status.OK && !verbose && m.failureInfo == null) {
                 continue;
             }
             list.add(moduleEntry(m));
@@ -437,7 +448,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
             r.put("errors", sessionErrors);
         }
         if (firstFailed != null) {
-            r.put("resume", resumeCommand(firstFailed));
+            r.put("resume", resumeCommand(request, workingDirectory, settingsProfiles, firstFailed.id));
         }
         if (log != null) {
             Map<String, Object> l = new LinkedHashMap<>();
@@ -460,7 +471,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         if (m.started && m.status != Status.NOT_BUILT && seconds(m.end - m.start) >= 0.1) {
             e.put("time_s", seconds(m.end - m.start));
         }
-        if (m.status == Status.FAILED && m.failureInfo != null) {
+        if (m.failureInfo != null) {
             e.putAll(m.failureInfo);
         } else if (m.status == Status.SKIPPED) {
             e.put("cause", skipCause(m));
@@ -503,7 +514,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                     if (m.failureInfo == null) {
                         m.status = Status.FAILED;
                         m.failure = t;
-                        m.failureInfo = analyzer.analyzeModule(t, m.project, m.failedMojo, m.startMillis);
+                        m.failureInfo = analyzer.analyzeModule(t, m.failedMojo, m.tests, m.testReports);
                     }
                     continue;
                 }
@@ -531,7 +542,9 @@ public class AgentOutputSpy extends AbstractEventSpy {
         return false;
     }
 
-    private String resumeCommand(Module failed) {
+    /** The command that resumes the build at {@code failedId}, keeping what the user typed. */
+    static String resumeCommand(
+            MavenExecutionRequest request, Path workingDirectory, List<String> settingsProfiles, String failedId) {
         StringBuilder sb = new StringBuilder("mvn");
         if (request != null) {
             for (String g : request.getGoals()) {
@@ -539,28 +552,41 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
             File pom = request.getPom();
             if (pom != null && !pom.toPath().toAbsolutePath().normalize().equals(workingDirectory.resolve("pom.xml"))) {
-                sb.append(" -f ").append(quote(relToWorkingDirectory(pom.toPath())));
+                sb.append(" -f ").append(quote(relTo(workingDirectory, pom.toPath())));
             }
             settingsOption(
                     sb,
                     "-s",
                     request.getUserSettingsFile(),
-                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"));
+                    Paths.get(System.getProperty("user.home"), ".m2", "settings.xml"),
+                    workingDirectory);
             if (System.getProperty("maven.conf") != null) {
                 // a custom global file may activate profiles; dropping it would drop them
                 settingsOption(
                         sb,
                         "-gs",
                         request.getGlobalSettingsFile(),
-                        Paths.get(System.getProperty("maven.conf"), "settings.xml"));
+                        Paths.get(System.getProperty("maven.conf"), "settings.xml"),
+                        workingDirectory);
             }
             List<String> profiles = new ArrayList<>(request.getActiveProfiles());
             profiles.removeAll(settingsProfiles);
+            List<String> projects = new ArrayList<>(request.getSelectedProjects());
+            // Maven 3 keeps "!x" exclusions apart from the selection; the resumed build must keep them
+            for (String p : request.getInactiveProfiles()) {
+                profiles.add("!" + p);
+            }
+            for (String p : request.getExcludedProjects()) {
+                projects.add("!" + p);
+            }
             if (!profiles.isEmpty()) {
                 sb.append(" -P").append(quote(String.join(",", profiles)));
             }
-            if (!request.getSelectedProjects().isEmpty()) {
-                sb.append(" -pl ").append(quote(String.join(",", request.getSelectedProjects())));
+            if (!projects.isEmpty()) {
+                sb.append(" -pl ").append(quote(String.join(",", projects)));
+            }
+            if (!request.isRecursive()) {
+                sb.append(" -N");
             }
             String make = request.getMakeBehavior();
             if (MavenExecutionRequest.REACTOR_MAKE_UPSTREAM.equals(make)) {
@@ -570,8 +596,11 @@ public class AgentOutputSpy extends AbstractEventSpy {
             } else if (MavenExecutionRequest.REACTOR_MAKE_BOTH.equals(make)) {
                 sb.append(" -am -amd");
             }
-            if (MavenExecutionRequest.REACTOR_FAIL_AT_END.equals(request.getReactorFailureBehavior())) {
+            String failure = request.getReactorFailureBehavior();
+            if (MavenExecutionRequest.REACTOR_FAIL_AT_END.equals(failure)) {
                 sb.append(" -fae");
+            } else if (MavenExecutionRequest.REACTOR_FAIL_NEVER.equals(failure)) {
+                sb.append(" -fn");
             }
             if (request.isOffline()) {
                 sb.append(" -o");
@@ -594,22 +623,22 @@ public class AgentOutputSpy extends AbstractEventSpy {
             }
         }
         // the module id is groupId:artifactId exactly when the artifactId alone is ambiguous
-        sb.append(" -rf ").append(failed.id.contains(":") ? failed.id : ":" + failed.id);
+        sb.append(" -rf ").append(failedId.contains(":") ? failedId : ":" + failedId);
         return sb.toString();
     }
 
     /** Appends {@code option file} unless the file is Maven's default. */
-    private void settingsOption(StringBuilder sb, String option, File file, Path dflt) {
+    private static void settingsOption(StringBuilder sb, String option, File file, Path dflt, Path workingDirectory) {
         if (file != null
                 && !file.toPath()
                         .toAbsolutePath()
                         .normalize()
                         .equals(dflt.toAbsolutePath().normalize())) {
-            sb.append(' ').append(option).append(' ').append(quote(relToWorkingDirectory(file.toPath())));
+            sb.append(' ').append(option).append(' ').append(quote(relTo(workingDirectory, file.toPath())));
         }
     }
 
-    private String relToWorkingDirectory(Path p) {
+    private static String relTo(Path workingDirectory, Path p) {
         Path abs = p.toAbsolutePath().normalize();
         return abs.startsWith(workingDirectory)
                 ? workingDirectory.relativize(abs).toString().replace(File.separatorChar, '/')
