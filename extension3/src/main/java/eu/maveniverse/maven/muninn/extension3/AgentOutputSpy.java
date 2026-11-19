@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -84,6 +85,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         Map<String, Object> failureInfo;
         SurefireReports.Result tests; // null if no test mojo ran
         Path testReports; // where the failing tests' reports are (or the last reports read)
+        final Map<Path, FileTime> countedReports = new HashMap<>(); // two executions may share a directory
 
         Module(MavenProject project, String id) {
             this.project = project;
@@ -227,7 +229,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         }
         Path dir = reportsDir(m, mojo, fs ? "failsafe-reports" : "surefire-reports");
         SurefireReports.Result r = SurefireReports.read(
-                SurefireReports.list(dir, m.mojoStartMillis),
+                SurefireReports.list(dir, m.mojoStartMillis, m.countedReports),
                 m.project,
                 paths,
                 limits.tests,

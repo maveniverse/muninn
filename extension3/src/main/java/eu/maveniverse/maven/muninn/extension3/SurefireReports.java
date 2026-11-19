@@ -12,6 +12,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -86,16 +87,18 @@ final class SurefireReports {
 
     /**
      * The {@code TEST-*.xml} files in {@code reportsDir} written since {@code since} (epoch millis); older ones are
-     * leftovers of earlier builds.
+     * leftovers of earlier builds. Files already in {@code seen} with the same timestamp were counted by an earlier
+     * execution in this module and are skipped; the listed ones are added to it.
      */
-    static List<Path> list(Path reportsDir, long since) {
+    static List<Path> list(Path reportsDir, long since, Map<Path, FileTime> seen) {
         List<Path> files = new ArrayList<>();
         // ponytail: whole-second cutoff covers filesystems with 1s mtime granularity; a report written in
         // the same second just before this build started still slips through
         long cutoff = since / 1000 * 1000;
         try (DirectoryStream<Path> ds = Files.newDirectoryStream(reportsDir, "TEST-*.xml")) {
             for (Path f : ds) {
-                if (Files.getLastModifiedTime(f).toMillis() >= cutoff) {
+                FileTime t = Files.getLastModifiedTime(f);
+                if (t.toMillis() >= cutoff && !t.equals(seen.put(f, t))) {
                     files.add(f);
                 }
             }
