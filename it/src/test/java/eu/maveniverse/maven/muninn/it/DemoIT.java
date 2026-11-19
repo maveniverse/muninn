@@ -194,6 +194,12 @@ class DemoIT {
         assertTrue(core.get("reports").asText().endsWith("core/target/test-reports"), core.toString());
     }
 
+    @Test
+    void failingTestOutputIsKept() {
+        JsonNode failure = module("core").get("failures").get(0);
+        assertEquals("[\"picking from [1.0, 1.2]\"]", failure.get("output").toString());
+    }
+
     /** core's NPE is thrown in api's code: the stack keeps frames from every reactor module. */
     @Test
     void stackKeepsFramesFromOtherModules() {

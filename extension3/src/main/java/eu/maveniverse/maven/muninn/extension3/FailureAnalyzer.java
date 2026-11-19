@@ -573,6 +573,7 @@ final class FailureAnalyzer {
         int diagnostics = 10;
         int tests = 10;
         int frames = 5;
+        int output = 10; // lines a failing test printed
         int message = 300;
     }
 }

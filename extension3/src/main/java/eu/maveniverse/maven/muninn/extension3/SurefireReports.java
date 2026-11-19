@@ -121,9 +121,7 @@ final class SurefireReports {
             MavenProject project,
             List<Path> classDirs,
             ReactorPaths paths,
-            int maxFailures,
-            int maxFrames,
-            int maxMessage) {
+            FailureAnalyzer.Limits limits) {
         Result r = new Result();
         List<Path> sourceRoots = sourceRoots(project);
         DocumentBuilder db;
@@ -160,11 +158,11 @@ final class SurefireReports {
                 if (problem == null) {
                     continue;
                 }
-                if (r.failures.size() >= maxFailures) {
+                if (r.failures.size() >= limits.tests) {
                     r.omitted++;
                     continue;
                 }
-                r.failures.add(entry(tc, problem, kind, classDirs, sourceRoots, paths, maxFrames, maxMessage));
+                r.failures.add(entry(tc, problem, kind, classDirs, sourceRoots, paths, limits));
             }
         }
         return r;
@@ -201,8 +199,7 @@ final class SurefireReports {
             List<Path> ownClassDirs,
             List<Path> sourceRoots,
             ReactorPaths paths,
-            int maxFrames,
-            int maxMessage) {
+            FailureAnalyzer.Limits limits) {
         String className = tc.getAttribute("classname");
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("test", className + "#" + tc.getAttribute("name"));
@@ -216,7 +213,7 @@ final class SurefireReports {
         if (message.isEmpty() && trace != null) {
             message = Text.firstLine(trace);
         }
-        m.put("message", Text.clip(message, maxMessage));
+        m.put("message", Text.clip(message, limits.message));
 
         List<String> frames = new ArrayList<>();
         String at = null;
@@ -234,7 +231,7 @@ final class SurefireReports {
                 if (at == null && (cls.equals(className) || cls.startsWith(className + "$"))) {
                     at = toSourcePath(cls, frame, sourceRoots, paths);
                 }
-                if (frames.size() < maxFrames) {
+                if (frames.size() < limits.frames) {
                     frames.add(stripModule(frame));
                 }
             }
@@ -245,7 +242,27 @@ final class SurefireReports {
         if (!frames.isEmpty()) {
             m.put("stack", frames);
         }
+        List<String> output = tail(text(tc, "system-out") + text(tc, "system-err"), limits);
+        if (!output.isEmpty()) {
+            m.put("output", output); // what the test printed; often the log line that explains the failure
+        }
         return m;
+    }
+
+    private static String text(Element tc, String name) {
+        Element e = firstChild(tc, name);
+        return e != null ? e.getTextContent() + "\n" : "";
+    }
+
+    /** The last {@code limits.output} non-blank lines, each clipped. */
+    private static List<String> tail(String s, FailureAnalyzer.Limits limits) {
+        List<String> lines = new ArrayList<>();
+        for (String line : s.split("\\R")) {
+            if (!line.trim().isEmpty()) {
+                lines.add(Text.clip(line, limits.message));
+            }
+        }
+        return new ArrayList<>(lines.subList(Math.max(0, lines.size() - limits.output), lines.size()));
     }
 
     /** "com.acme.Foo.bar(Foo.java:12)" -> "com.acme.Foo" */

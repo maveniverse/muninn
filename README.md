@@ -27,7 +27,7 @@ Then turn it on per run. Without the switch the extension does nothing, so human
 | `MUNINN_OUTPUT=json` | Same, via environment (handy in `AGENTS.md` / agent config) |
 | *(none)* | Auto-enables `json` when an agent is detected (`CLAUDECODE=1`, `GEMINI_CLI=1`, or `AGENT` set). `-Dmuninn.output=off` or `MUNINN_OUTPUT=off` opts out |
 | `-Dmuninn.output.verbose=true` | Also list successful modules |
-| `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N` | Budgets (defaults 10, 10, 5) |
+| `-Dmuninn.output.maxErrors=N`, `.maxTests=N`, `.maxFrames=N`, `.maxOutput=N` | Budgets (defaults 10, 10, 5, 10): diagnostics, failing tests, stack frames, and lines of a failing test's output |
 | `-l <file>` | The extension stays inactive whatever the switches say: Maven's own log file is left as is |
 
 Every `-Dmuninn.output*` option can also be given as a system property, e.g. in `MAVEN_OPTS`; the command line wins.
@@ -57,7 +57,8 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "type": "java.lang.AssertionError", "message": "expected:<1.2> but was:<1.1>",
         "at": "core/src/test/java/com/acme/core/ResolverTest.java:27",
         "stack": ["com.acme.core.ResolverTest.check(ResolverTest.java:27)",
-                  "com.acme.core.ResolverTest.testRangeIncludesUpper(ResolverTest.java:14)"]},
+                  "com.acme.core.ResolverTest.testRangeIncludesUpper(ResolverTest.java:14)"],
+        "output": ["picking from [1.0, 1.2]"]},
        {"test": "com.acme.core.ResolverTest#testMissingNode", "kind": "error",
         "type": "java.lang.NullPointerException", "message": "Cannot invoke \"String.length()\" because \"version\" is null",
         "at": "core/src/test/java/com/acme/core/ResolverTest.java:30",
@@ -95,7 +96,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 | `kind` | Source | Content |
 |---|---|---|
 | `compile` | Compiler plugin's exception long message (`file:[line,col] message` plus indented detail lines) | File relative to the reactor root, line, column, message, detail; deduplicated and capped |
-| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to classes of the reactor's modules |
+| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to classes of the reactor's modules, last lines the test printed |
 | `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, `via` (the chain from the direct dependency, for transitive ones), each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
 | `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |
@@ -145,6 +146,7 @@ The demo reactor uses the real maven-compiler-plugin, maven-surefire-plugin and 
 - **Javadoc warnings on success:** reported only when the build fails (errors or `failOnWarnings`); on a passing build they are just counted.
 - **`via` coverage:** only for resolution failures; not for collection failures (missing parent or descriptor pom) or plugin resolution, and only one path is shown when several exist.
 - **Fixtures for `via`:** the demo covers one transitive path only; the javadoc parser is unit-tested against captured maven-javadoc-plugin 3.12.0 output, but the demo has no javadoc case.
+- **Test output with `redirectTestOutputToFile`:** a failing test's `output` comes from `<system-out>`/`<system-err>` in its report; when surefire redirects output to `*-output.txt` files, it is not shown.
 - **Parallel builds on 3.9:** `-T` is tested on 3.10 only.
 
 ## Build

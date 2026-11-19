@@ -142,6 +142,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         limits.diagnostics = intProp(prop(user, sys, PROP + ".maxErrors"), limits.diagnostics);
         limits.tests = intProp(prop(user, sys, PROP + ".maxTests"), limits.tests);
         limits.frames = intProp(prop(user, sys, PROP + ".maxFrames"), limits.frames);
+        limits.output = intProp(prop(user, sys, PROP + ".maxOutput"), limits.output);
         startNanos = System.nanoTime();
         startMillis = System.currentTimeMillis();
         try {
@@ -234,9 +235,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
                 m.project,
                 reactorClassDirs(),
                 paths,
-                limits.tests,
-                limits.frames,
-                limits.message);
+                limits);
         if (r.run == 0) {
             return; // skipped (-DskipTests) or nothing matched: older reports in the directory are not ours
         }
