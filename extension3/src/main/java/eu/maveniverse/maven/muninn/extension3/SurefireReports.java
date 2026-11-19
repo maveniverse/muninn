@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -111,18 +112,19 @@ final class SurefireReports {
 
     /**
      * @param files   report files, see {@link #list}
-     * @param project the module: frames from its classes are "ours", its source roots locate them
-     * @param paths   relativizes absolute paths for the report
+     * @param project   the module; its source roots locate the failing line in the test
+     * @param classDirs output directories of all reactor modules: frames from classes found there are "ours"
+     * @param paths     relativizes absolute paths for the report
      */
     static Result read(
             List<Path> files,
             MavenProject project,
+            List<Path> classDirs,
             ReactorPaths paths,
             int maxFailures,
             int maxFrames,
             int maxMessage) {
         Result r = new Result();
-        List<Path> ownClassDirs = ownClassDirs(project);
         List<Path> sourceRoots = sourceRoots(project);
         DocumentBuilder db;
         try {
@@ -162,16 +164,19 @@ final class SurefireReports {
                     r.omitted++;
                     continue;
                 }
-                r.failures.add(entry(tc, problem, kind, ownClassDirs, sourceRoots, paths, maxFrames, maxMessage));
+                r.failures.add(entry(tc, problem, kind, classDirs, sourceRoots, paths, maxFrames, maxMessage));
             }
         }
         return r;
     }
 
-    private static List<Path> ownClassDirs(MavenProject p) {
+    /** Main and test output directories of {@code projects}; a failure often starts in a sibling module. */
+    static List<Path> classDirs(Collection<MavenProject> projects) {
         List<Path> dirs = new ArrayList<>();
-        dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
-        dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
+        for (MavenProject p : projects) {
+            dirs.add(Paths.get(p.getBuild().getOutputDirectory()));
+            dirs.add(Paths.get(p.getBuild().getTestOutputDirectory()));
+        }
         return dirs;
     }
 

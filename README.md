@@ -59,10 +59,11 @@ From the demo in `it/`: six modules with a test failure, a compile error, a miss
         "stack": ["com.acme.core.ResolverTest.check(ResolverTest.java:27)",
                   "com.acme.core.ResolverTest.testRangeIncludesUpper(ResolverTest.java:14)"]},
        {"test": "com.acme.core.ResolverTest#testMissingNode", "kind": "error",
-        "type": "java.lang.NullPointerException", "message": "Cannot invoke \"String.length()\" because ...",
-        "at": "core/src/test/java/com/acme/core/ResolverTest.java:22",
-        "stack": ["com.acme.core.Resolver.depth(Resolver.java:22)",
-                  "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:22)"]}],
+        "type": "java.lang.NullPointerException", "message": "Cannot invoke \"String.length()\" because \"version\" is null",
+        "at": "core/src/test/java/com/acme/core/ResolverTest.java:30",
+        "stack": ["com.acme.api.Version.length(Version.java:16)",
+                  "com.acme.core.Resolver.depth(Resolver.java:30)",
+                  "com.acme.core.ResolverTest.testMissingNode(ResolverTest.java:30)"]}],
      "reports": "core/target/test-reports"},
     {"id": "util", "path": "util", "status": "FAILED", "phase": "compile", "mojo": "compiler:compile@default-compile",
      "kind": "compile", "summary": "3 compilation error(s)",
@@ -94,7 +95,7 @@ On this run the console output drops from 13.4 KB (~3,300 tokens) to 2.4 KB (~60
 | `kind` | Source | Content |
 |---|---|---|
 | `compile` | Compiler plugin's exception long message (`file:[line,col] message` plus indented detail lines) | File relative to the reactor root, line, column, message, detail; deduplicated and capped |
-| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to the module's own classes |
+| `test` | Surefire/failsafe `TEST-*.xml` reports, not console output | Counts, failing test, type, message, location of the failing line in the test, stack trimmed to classes of the reactor's modules |
 | `dependency` | Maven's `DependencyResolutionResult` and Resolver's `ArtifactResolutionException` | Coordinates, `via` (the chain from the direct dependency, for transitive ones), each repository tried, and a reason: `not_found`, `cached_failure` (with a hint to use `-U`), `offline_not_cached`, `unauthorized`, `forbidden`, `checksum` or `transfer` |
 | `javadoc` | maven-javadoc-plugin's exception message, which embeds the javadoc tool output | Errors and warnings with file, line, column and message; warnings appear only when the build failed (errors, or `failOnWarnings`) |
 | `pom` | `ProjectBuildingException` model problems | File and line, message (session-level `errors`, no module) |

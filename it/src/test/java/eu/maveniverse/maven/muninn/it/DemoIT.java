@@ -194,6 +194,14 @@ class DemoIT {
         assertTrue(core.get("reports").asText().endsWith("core/target/test-reports"), core.toString());
     }
 
+    /** core's NPE is thrown in api's code: the stack keeps frames from every reactor module. */
+    @Test
+    void stackKeepsFramesFromOtherModules() {
+        JsonNode stack = module("core").get("failures").get(1).get("stack");
+        assertTrue(stack.get(0).asText().startsWith("com.acme.api.Version.length(Version.java:"), stack.toString());
+        assertTrue(stack.get(1).asText().startsWith("com.acme.core.Resolver.depth("), stack.toString());
+    }
+
     @Test
     void compileErrors() {
         assertEquals(3, module("util").get("errors").size());

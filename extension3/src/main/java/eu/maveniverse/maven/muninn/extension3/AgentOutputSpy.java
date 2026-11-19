@@ -106,6 +106,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
     private long startNanos = System.nanoTime();
     private long startMillis = System.currentTimeMillis();
     private final Map<MavenProject, Module> modules = new LinkedHashMap<>();
+    private List<Path> reactorClassDirs; // frames from these classes are kept in test stacks
     private final List<Map<String, Object>> sessionErrors = new ArrayList<>();
     private ReactorPaths paths = new ReactorPaths(Paths.get("."));
     private FailureAnalyzer analyzer;
@@ -231,6 +232,7 @@ public class AgentOutputSpy extends AbstractEventSpy {
         SurefireReports.Result r = SurefireReports.read(
                 SurefireReports.list(dir, m.mojoStartMillis, m.countedReports),
                 m.project,
+                reactorClassDirs(),
                 paths,
                 limits.tests,
                 limits.frames,
@@ -245,6 +247,13 @@ public class AgentOutputSpy extends AbstractEventSpy {
             m.testReports = dir;
         }
         m.tests.add(r, limits.tests);
+    }
+
+    private List<Path> reactorClassDirs() {
+        if (reactorClassDirs == null) {
+            reactorClassDirs = SurefireReports.classDirs(modules.keySet());
+        }
+        return reactorClassDirs;
     }
 
     /** The mojo's {@code reportsDirectory} if configured (expressions evaluated), else the plugin default. */
