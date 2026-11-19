@@ -13,7 +13,7 @@ Register it in `.mvn/extensions.xml` or, **as recommended user-wide extension in
   <extension>
     <groupId>eu.maveniverse.maven.muninn</groupId>
     <artifactId>extension3</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2</version>
   </extension>
 </extensions>
 ```
